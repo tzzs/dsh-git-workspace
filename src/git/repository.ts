@@ -1,0 +1,5 @@
+import {command} from './exec.js'; import type {Result,ToolError} from '../types.js'
+export interface Repository { root:string; name:string; remote:string|null }
+export function error(code:string,message:string,hint?:string):{error:ToolError}{return {error:{code,message,...hint?{hint}:{}}}}
+export async function repository(cwd=process.cwd()):Promise<Result<Repository>> { try { const root=(await command('git',['rev-parse','--show-toplevel'],cwd)).stdout.trim(); let remote:string|null=null; try{remote=(await command('git',['remote','get-url','origin'],root)).stdout.trim()||null}catch{}; return {root,name:root.split(/[\\/]/).pop()||root,remote} } catch{return error('NOT_A_GIT_REPOSITORY','Current directory is not a Git repository.','Run this tool inside a Git repository.')} }
+export function parseGitRemote(input:string):{host:string;owner:string;repository:string}|null { let s=input.trim().replace(/\.git$/,''); let m=s.match(/^(?:\w+@)?([^/:]+)[:/]([^/]+)\/([^/]+)$/); if(!m){try{const u=new URL(s);m=[s,u.hostname,u.pathname.split('/')[1]??'',u.pathname.split('/')[2]??'']}catch{return null}} return m[1]&&m[2]&&m[3]?{host:m[1],owner:m[2],repository:m[3]}:null }
