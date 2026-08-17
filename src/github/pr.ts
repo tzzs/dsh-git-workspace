@@ -1,3 +1,129 @@
-import {command} from '../git/exec.js';import {repository,parseGitRemote,error} from '../git/repository.js';import type {Result} from '../types.js'
-export interface PullRequest{number:number;title:string;state:string;draft:boolean;base:string;head:string;url:string}
-export async function githubPr(cwd=process.cwd()):Promise<Result<{repository:{owner:string;name:string};branch:string|null;pullRequests:PullRequest[]}>>{const r=await repository(cwd);if('error'in r)return r;if(!r.remote)return error('NO_GITHUB_REMOTE','No GitHub remote named origin was found.');const remote=parseGitRemote(r.remote);if(!remote||!remote.host.toLowerCase().includes('github'))return error('NOT_GITHUB_REPOSITORY','The origin remote is not a GitHub repository.');let branch:string|null=null;try{branch=(await command('git',['branch','--show-current'],r.root)).stdout.trim()||null}catch{}if(!branch)return {repository:{owner:remote.owner,name:remote.repository},branch:null,pullRequests:[]};try{const out=await command('gh',['pr','list','--repo',`${remote.owner}/${remote.repository}`,'--head',branch,'--state','all','--json','number,title,state,isDraft,baseRefName,headRefName,url'],r.root);const rows=JSON.parse(out.stdout) as Array<{number:number;title:string;state:string;isDraft:boolean;baseRefName:string;headRefName:string;url:string}>;return {repository:{owner:remote.owner,name:remote.repository},branch,pullRequests:rows.map(x=>({number:x.number,title:x.title,state:x.state,draft:x.isDraft,base:x.baseRefName,head:x.headRefName,url:x.url}))}}catch(e){const msg=String((e as Error).message);const cause=String((e as {cause?:unknown}).cause??'');const code=String((e as {code?:unknown}).code??'');if(code==='ENOENT'||msg.includes('ENOENT')||cause.includes('ENOENT')||msg.includes('not found')||msg.includes('spawn gh')||msg.startsWith('Error: spawn gh'))return error('GH_NOT_INSTALLED','GitHub CLI (gh) is not installed.','Install gh and try again.');if(/auth|login|not logged|logged into/i.test(msg)||/auth|login|not logged|logged into/i.test(String((e as {stderr?:unknown}).stderr??'')))return error('GH_NOT_AUTHENTICATED','GitHub CLI is not authenticated.','Run `gh auth login` and try again.');return error('GITHUB_QUERY_FAILED','Unable to query GitHub pull requests.','Check `gh auth status` and repository access.')}}
+import { command } from '../git/exec.js'
+import { error } from '../git/repository.js'
+import { githubContext, ghJson, repoArg } from './client.js'
+import type { Result, PullRequest } from '../types.js'
+
+interface PrRow {
+  number: number
+  title: string
+  body?: string | null
+  state: string
+  isDraft: boolean
+  author?: { login: string } | null
+  baseRefName: string
+  headRefName: string
+  url: string
+  createdAt?: string | null
+  updatedAt?: string | null
+  files?: { totalCount: number } | null
+  additions?: number | null
+  deletions?: number | null
+  reviewDecision?: string | null
+  mergeable?: string | null
+  merged?: boolean | null
+}
+
+export interface PrResult {
+  repository: { owner: string; name: string }
+  branch: string | null
+  pullRequests: PullRequest[]
+}
+
+function mapPr(x: PrRow): PullRequest {
+  return {
+    number: x.number,
+    title: x.title,
+    body: x.body ?? null,
+    state: x.state,
+    draft: x.isDraft,
+    author: x.author?.login ?? null,
+    base: x.baseRefName,
+    head: x.headRefName,
+    url: x.url,
+    createdAt: x.createdAt ?? null,
+    updatedAt: x.updatedAt ?? null,
+    stats: {
+      files: x.files?.totalCount ?? 0,
+      additions: x.additions ?? 0,
+      deletions: x.deletions ?? 0,
+    },
+    reviewDecision: x.reviewDecision ?? null,
+    mergeable: x.mergeable ?? null,
+    merged: x.merged ?? false,
+  }
+}
+
+export async function githubPr(
+  cwd = process.cwd(),
+): Promise<Result<PrResult>> {
+  const ctx = await githubContext(cwd)
+  if ('error' in ctx) return ctx
+
+  let branch: string | null = null
+  try {
+    branch =
+      (await command('git', ['branch', '--show-current'], ctx.root)).stdout
+        .trim() || null
+  } catch {
+    branch = null
+  }
+
+  const repo = repoArg(ctx)
+  const baseArgs = [
+    'pr',
+    'list',
+    '--repo',
+    repo,
+    '--state',
+    'all',
+    '--json',
+    [
+      'number',
+      'title',
+      'body',
+      'state',
+      'isDraft',
+      'author',
+      'baseRefName',
+      'headRefName',
+      'url',
+      'createdAt',
+      'updatedAt',
+      'additions',
+      'deletions',
+      'reviewDecision',
+      'mergeable',
+      'merged',
+    ].join(','),
+  ]
+
+  if (branch) {
+    const r = await ghJson<PrRow[]>(
+      ctx,
+      [...baseArgs, '--head', branch],
+      {
+        code: 'GITHUB_QUERY_FAILED',
+        message: 'Unable to query GitHub pull requests for the current branch.',
+        hint: 'Verify gh authentication and that the branch has an open PR.',
+      },
+    )
+    if ('error' in r) return r
+    return {
+      repository: { owner: ctx.owner, name: ctx.name },
+      branch,
+      pullRequests: r.map(mapPr),
+    }
+  }
+
+  const r = await ghJson<PrRow[]>(ctx, baseArgs, {
+    code: 'GITHUB_QUERY_FAILED',
+    message: 'Unable to query GitHub pull requests.',
+    hint: 'Verify gh authentication.',
+  })
+  if ('error' in r) return r
+  return {
+    repository: { owner: ctx.owner, name: ctx.name },
+    branch: null,
+    pullRequests: r.map(mapPr),
+  }
+}

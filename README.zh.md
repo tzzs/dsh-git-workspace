@@ -2,22 +2,62 @@
 
 > [English](README.md)
 
-`@tzzs/dsh-git-workspace` 是一个面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Agent 的只读 Git / GitHub Workspace 插件。它通过官方 `dsh.bundle`、profile 和 Cordis plugin 机制安装，不修改 DeepSeek Harness 本体。
+`@tzzs/dsh-git-workspace` 是一个面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Agent 的只读 Git / GitHub Coding Workflow Workspace 插件。它通过官方 `dsh.bundle`、profile 和 Cordis plugin 机制安装，不修改 DeepSeek Harness 本体。
 
-### 功能
+Version 1 仍然保持 **只读**。不执行 commit、push、checkout、stage、merge、创建 branch、创建 PR、写 comment/review，也不自动修改源码。
 
-插件提供以下六个 Agent Tools：
+### 设计目标
+
+- **Agent-first**：每个 Tool 都返回结构化、强类型数据，而不是原始 CLI stdout。
+- **Bounded context**：diff、commit、log 都会做摘要与分页，避免污染 Agent context。
+- **安全执行**：所有 Git / `gh` 命令都通过 `execFile(command, argv)` 执行，用户输入绝不拼接到 shell command。
+- **向后兼容**：原有六个 Tool 的名称、参数和返回结构保持不变。
+
+### Tools
+
+插件共提供 22 个 Agent Tools，按类别组织。
+
+#### Workspace
 
 | Tool | 作用 |
 | --- | --- |
-| `git_workspace` | 一次返回仓库、分支、变更统计、最近提交和当前分支 PR 摘要 |
-| `git_status` | 返回 branch、upstream、ahead/behind 以及结构化工作区状态 |
-| `git_files` | 列出工作区、staged、committed 或全部文件 |
-| `git_diff` | 返回结构化 diff、文件统计和 hunks，支持分页及 staged/base/head |
-| `git_commits` | 返回最近提交，可按路径过滤，默认最多 20 条，最多 100 条 |
-| `github_pr` | 使用 GitHub CLI 查询当前分支对应的全部 Pull Requests |
+| `git_workspace` | 聚合只读工作区上下文：仓库、分支、变更、对比、最近提交、PR 摘要、CI 摘要 |
+| `git_status` | 返回 branch、upstream、ahead/behind 与工作区状态 |
+| `git_files` | 按 scope 列出文件：`working-tree`、`staged`、`committed`、`all` |
+| `git_diff` | 结构化、有界 diff，含文件元数据（added/deleted/renamed/copied/binary）与分页 hunks |
 
-第一版是只读插件，不执行 commit、push、checkout、stage、merge、PR 修改或代码自动修改。
+#### History
+
+| Tool | 作用 |
+| --- | --- |
+| `git_commits` | 最近提交，支持 range（`base..head`）、author、path 过滤，含每个提交的文件摘要 |
+| `git_show` | 单个 commit 的完整信息，支持 SHA / short SHA / revision（如 `HEAD`、`HEAD~1`） |
+| `git_compare` | 比较两个 revision / branch，返回 ahead/behind、统计与文件列表 |
+| `git_blame` | 追踪文件每一行的 commit 历史，支持行范围 |
+
+#### Repository
+
+| Tool | 作用 |
+| --- | --- |
+| `git_branches` | 本地与 remote branch，含 current、upstream、ahead、behind |
+| `git_remotes` | remote 的 fetch/push URL 与解析后的 GitHub 元数据（支持 `origin` fork + `upstream`） |
+| `git_worktrees` | 列出所有 worktree（只读） |
+| `git_stash` | 列出 stash（只读） |
+| `git_tags` | 列出 tag，含 commit 与 tagger 信息 |
+
+#### GitHub
+
+| Tool | 作用 |
+| --- | --- |
+| `github_pr` | 当前分支对应的所有 PR，含完整元数据、统计、review decision 与 mergeable |
+| `github_pr_diff` | 指定 PR 的结构化、有界 diff |
+| `github_pr_reviews` | PR 上的 reviews（`APPROVED`、`CHANGES_REQUESTED`、`COMMENTED`、`PENDING`） |
+| `github_pr_comments` | conversation 与 inline review comments，含 review thread 的 `resolved` 状态 |
+| `github_ci` | PR 或当前 branch / commit 的 CI / check 状态 |
+| `github_ci_logs` | 指定 run（可选 job）的分页 CI 日志 |
+| `github_issue` | 按编号读取 GitHub issue |
+| `github_issue_comments` | 读取 issue 的对话评论 |
+| `github_releases` | GitHub releases，含 tag、日期与 URL |
 
 ### 安装
 
@@ -49,124 +89,144 @@ dsh --profile dev
 
 ### GitHub CLI 配置
 
-`github_pr` 依赖本地 `gh` CLI，不实现 OAuth 或 GitHub API authentication：
+`github_*` Tool 依赖本地 `gh` CLI，不实现 OAuth 或 GitHub API authentication：
 
 ```bash
 gh auth login
 gh auth status
 ```
 
-没有安装或没有登录时，Tool 会返回结构化错误：
+没有安装或没有登录时，Tool 返回结构化错误：
 
 - `GH_NOT_INSTALLED`
 - `GH_NOT_AUTHENTICATED`
 - `NO_GITHUB_REMOTE`
 - `NOT_GITHUB_REPOSITORY`
 - `GITHUB_QUERY_FAILED`
+- `GITHUB_RESOURCE_NOT_FOUND`
+- `GITHUB_PERMISSION_DENIED`
 
 ### Tool 参数
 
 ```ts
 git_workspace()
+
 git_status()
-git_files({
-  scope: "working-tree" | "staged" | "committed" | "all"
-})
-git_diff({
-  path?: string,
-  staged?: boolean,
-  base?: string,
-  head?: string,
-  offset?: number,
-  limit?: number
-})
-git_commits({
-  limit?: number,
-  path?: string
-})
+
+git_files({ scope: "working-tree" | "staged" | "committed" | "all" })
+
+git_diff({ path?, staged?, base?, head?, offset?, limit? })
+
+git_commits({ limit?, path?, base?, head?, from?, to?, author? })
+
+git_show({ sha?, includeDiff?, includeFiles?, offset?, limit? })
+
+git_compare({ base?, head?, path?, offset?, limit? })
+
+git_blame({ path, startLine?, endLine?, revision?, limit? })
+
+git_branches()
+
+git_remotes()
+
+git_worktrees()
+
+git_stash()
+
+git_tags()
+
 github_pr()
-```
 
-示例：
+github_pr_diff({ number, path?, offset?, limit? })
 
-```json
-{"path":"src/index.ts","limit":300}
-```
+github_pr_reviews({ number })
 
-```json
-{"staged":true}
-```
+github_pr_comments({ number })
 
-```json
-{"base":"HEAD~3","head":"HEAD"}
+github_ci({ number?, branch? })
+
+github_ci_logs({ runId, jobId?, offset?, limit? })
+
+github_issue({ number })
+
+github_issue_comments({ number })
+
+github_releases({ limit? })
 ```
 
 ### 返回值示例
 
-`git_status`：
+`git_workspace` 返回聚合摘要：
 
 ```json
 {
-  "branch": {
-    "name": "feature/git-plugin",
-    "upstream": "origin/feature/git-plugin",
-    "ahead": 2,
-    "behind": 0
+  "repository": {
+    "root": "/workspace/project",
+    "name": "project",
+    "remote": "git@github.com:owner/project.git",
+    "github": { "host": "github.com", "owner": "owner", "name": "project" }
   },
-  "files": [
-    {"path":"src/index.ts","status":"modified","staged":false},
-    {"path":"src/new.ts","status":"untracked","staged":false}
-  ]
+  "branch": { "name": "feature/x", "upstream": "origin/feature/x", "ahead": 2, "behind": 0 },
+  "changes": { "modified": 2, "staged": 1, "deleted": 0, "renamed": 0, "untracked": 3 },
+  "workspace": { "clean": false, "modified": 2, "staged": 1, "deleted": 0, "renamed": 0, "untracked": 3 },
+  "comparison": { "base": "main", "ahead": 3, "behind": 0 },
+  "commits": { "ahead": 3, "recent": [{ "sha": "...", "shortSha": "...", "message": "...", "author": "...", "date": "..." }] },
+  "pullRequest": { "number": 3, "title": "...", "state": "OPEN", "draft": false, "url": "..." },
+  "ci": { "status": "success", "checks": [{ "name": "test", "status": "completed", "conclusion": "success" }] }
 }
 ```
 
-`git_diff` 返回结构化文件和 hunks：
+`github_pr` 返回 `pullRequests[]`（同一 branch 可能对应多个 PR），含完整元数据：
 
 ```json
 {
-  "files": [{
-    "path": "src/index.ts",
-    "oldPath": null,
-    "status": "modified",
-    "additions": 3,
-    "deletions": 1,
-    "hunks": [{
-      "oldStart": 10,
-      "oldLines": 4,
-      "newStart": 10,
-      "newLines": 6,
-      "lines": [" context", "-old", "+new"]
-    }]
-  }],
-  "raw": "..."
-}
-```
-
-`github_pr` 返回 `pullRequests[]`，因为同一 branch 可能对应多个 PR：
-
-```json
-{
-  "repository": {"owner":"tzzs","name":"dsh-git-workspace"},
-  "branch": "feature/git-plugin",
+  "repository": { "owner": "owner", "name": "project" },
+  "branch": "feature/x",
   "pullRequests": [{
     "number": 3,
-    "title": "feat: add git workspace",
+    "title": "feat: ...",
+    "body": "...",
     "state": "OPEN",
     "draft": false,
+    "author": "alice",
     "base": "main",
-    "head": "feature/git-plugin",
-    "url": "https://github.com/.../pull/3"
+    "head": "feature/x",
+    "url": "https://github.com/owner/project/pull/3",
+    "createdAt": "...",
+    "updatedAt": "...",
+    "stats": { "files": 4, "additions": 120, "deletions": 40 },
+    "reviewDecision": "APPROVED",
+    "mergeable": "MERGEABLE",
+    "merged": false
   }]
 }
 ```
 
+### 错误处理
+
+所有 Tool 都返回统一的 `Result`。成功返回数据结构；失败返回：
+
+```json
+{
+  "error": { "code": "...", "message": "...", "hint": "..." }
+}
+```
+
+稳定的错误码：
+
+- Git：`NOT_A_GIT_REPOSITORY`、`GIT_COMMAND_FAILED`、`INVALID_GIT_ARGUMENT`、`INVALID_PATH`、`REVISION_NOT_FOUND`
+- GitHub：`NO_GITHUB_REMOTE`、`NOT_GITHUB_REPOSITORY`、`GH_NOT_INSTALLED`、`GH_NOT_AUTHENTICATED`、`GITHUB_QUERY_FAILED`、`GITHUB_RESOURCE_NOT_FOUND`、`GITHUB_PERMISSION_DENIED`
+
+不会把底层异常堆栈直接暴露给 Agent。
+
 ### 安全性
 
-- 所有 Git 和 `gh` 命令都通过 `execFile(command, argv)` 执行。
-- 用户输入不会拼接进 shell command。
-- path、base、head 等参数不会突破 Git 参数边界。
-- 所有 Git Tools 都能处理非 Git repository，并返回结构化错误。
-- 默认限制 diff 和 commit 数量，避免污染 Agent context。
+- 所有 Git 与 `gh` 命令都通过 `execFile(command, argv)` 执行。
+- 用户输入绝不拼接进 shell command。
+- revision、path、branch、commit、PR number、issue number、query 都会做校验：拒绝 NUL 字节，revision/path 拒绝以 `-` 开头的参数。
+- path 一律放在 `--` 之后（例如 `git diff revision -- path`）。
+- 不存在万能的 `git_execute` / `github_execute` Tool。
+- diff、commit、blame、CI log 结果默认做 bound 与分页。
 - 插件不执行破坏性 Git 操作。
 
 ### 开发
@@ -196,15 +256,12 @@ npm run build
 node scripts/agent-loop-integration.mjs
 ```
 
-该脚本使用 Harness 的真实 Agent Loop、ToolRuntime 和脚本化 LLM adapter，验证六个 Tool 的发现、调用和结果返回，不需要真实 LLM 账号。
+该脚本使用 Harness 的真实 Agent Loop、ToolRuntime 和脚本化 LLM adapter，验证 22 个 Tool 的发现、调用和结果返回，不需要真实 LLM 账号。
 
 ### 官方 profile 验证
 
 ```bash
-# 本地包安装到 test profile
 dsh plugin --profile test add ./path/to/dsh-git-workspace
-
-# 无交互地检查 bundle composition
 dsh --profile test --dump-config
 ```
 
@@ -233,11 +290,8 @@ make pack
 
 ### Roadmap
 
+- 第二阶段 mutation（暂未实现）：`git_branch_create`、`git_stage`、`git_unstage`、`git_commit`、`git_push`、`git_checkout`、`git_merge`、`github_pr_create`、`github_pr_merge`、`github_pr_comment`、`github_pr_review`
 - Git Diff Viewer UI
-- PR review 和 comments
-- CI 状态
-- 更丰富的 committed 文件元数据
 - PR 与 commit 关联视图
 
 ---
-
