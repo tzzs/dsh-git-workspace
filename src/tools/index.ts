@@ -1,3 +1,50 @@
-import {gitStatus} from '../git/status.js';import {gitFiles} from '../git/files.js';import {gitDiff} from '../git/diff.js';import {gitCommits} from '../git/commits.js';import {githubPr} from '../github/pr.js';import {repository} from '../git/repository.js'
-export {gitStatus,gitFiles,gitDiff,gitCommits,githubPr}
-export async function gitWorkspace(cwd=process.cwd()){const r=await repository(cwd);if('error'in r)return r;const [s,p,c]=await Promise.all([gitStatus(r.root),githubPr(r.root),gitCommits({limit:1},r.root)]);if('error'in s)return s;return {repository:r,branch:s.branch,changes:{modified:s.files.filter(x=>x.status==='modified').length,staged:s.files.filter(x=>x.staged).length,deleted:s.files.filter(x=>x.status==='deleted').length,renamed:s.files.filter(x=>x.status==='renamed').length,untracked:s.files.filter(x=>x.status==='untracked').length},commits:{ahead:s.branch.ahead,recent:c},pullRequest:'error'in p?null:p.pullRequests[0]??null}}
+import { gitStatus } from '../git/status.js'
+import { gitFiles } from '../git/files.js'
+import { gitDiff } from '../git/diff.js'
+import { gitCommits } from '../git/commits.js'
+import { gitShow } from '../git/show.js'
+import { gitCompare } from '../git/compare.js'
+import { gitBlame } from '../git/blame.js'
+import { gitBranches } from '../git/branches.js'
+import { gitRemotes } from '../git/remotes.js'
+import { gitWorktrees } from '../git/worktrees.js'
+import { gitStash } from '../git/stash.js'
+import { gitTags } from '../git/tags.js'
+import { githubPr } from '../github/pr.js'
+import { githubPrDiff } from '../github/pr_diff.js'
+import { githubPrReviews } from '../github/pr_reviews.js'
+import { githubPrComments } from '../github/pr_comments.js'
+import { githubCi } from '../github/ci.js'
+import { githubCiLogs } from '../github/ci_logs.js'
+import { githubIssue } from '../github/issue.js'
+import { githubIssueComments } from '../github/issue_comments.js'
+import { githubReleases } from '../github/releases.js'
+import { repository, listRemotes } from '../git/repository.js'
+import { gitWorkspace } from './git-workspace.js'
+
+export {
+  gitWorkspace,
+  gitStatus,
+  gitFiles,
+  gitDiff,
+  gitCommits,
+  gitShow,
+  gitCompare,
+  gitBlame,
+  gitBranches,
+  gitRemotes,
+  gitWorktrees,
+  gitStash,
+  gitTags,
+  githubPr,
+  githubPrDiff,
+  githubPrReviews,
+  githubPrComments,
+  githubCi,
+  githubCiLogs,
+  githubIssue,
+  githubIssueComments,
+  githubReleases,
+  repository,
+  listRemotes,
+}
