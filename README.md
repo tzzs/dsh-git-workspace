@@ -160,6 +160,16 @@ node scripts/agent-loop-integration.mjs
 
 This uses the real Harness Agent Loop and ToolRuntime with a scripted LLM adapter, so it verifies discovery, invocation, and results for all six Tools without a real LLM account.
 
+To verify the plugin in the browser UI, serve it through an isolated local `web` profile:
+
+```bash
+make local-web
+```
+
+This installs the checkout into `$DSH_HOME/profiles/web` (default `~/.dsh-git-workspace`), serves the DeepSeek Harness browser UI on a free port, and prints a line like `dsh web: http://127.0.0.1:PORT`. The server takes several seconds to settle before the URL appears. Use `make local-run` instead for the headless (non-web) local profile.
+
+Note: `$DSH_HOME` must live on a real ext4 filesystem (e.g. under `$HOME`), not on a WSL 9p/drvfs mount like `/mnt/*`. dsh enforces owner-only permissions on its credentials file, which cannot be set on NTFS-backed mounts. Plugin source can stay anywhere; only profile data needs the native filesystem.
+
 ### Official profile verification
 
 ```bash
