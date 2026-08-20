@@ -59,6 +59,40 @@ The plugin provides 22 Agent Tools, organized by category.
 | `github_issue_comments` | The conversation comments on an issue |
 | `github_releases` | GitHub releases with tag, date, and URL |
 
+## Git Workspace UI
+
+> See [docs/ui.md](docs/ui.md) for the UI architecture and [docs/dsh-ui-api.md](docs/dsh-ui-api.md) for the DSH Web UI extension API.
+
+The plugin also ships a browser half that turns the backend tools into a
+compact, persistent **Git Workspace** inside the DeepSeek Harness Web UI.
+
+### What it does
+
+- **Compact tool cards** — every `git_*` / `github_*` call the Agent makes
+  renders as a Git Workspace card in the conversation (branch, ahead/behind,
+  changes, commits, PR, CI) instead of raw JSON.
+- **Persistent Git Workspace panel** — a sidebar foot action ("Git Workspace")
+  opens a floating panel showing the live workspace summary: current branch,
+  upstream, changes grouped by status, commits, PR, and CI checks.
+- **Shared context** — the Agent and the UI consume the same `git_*` tools, so
+  both see the same Git state. There is no separate frontend data pipeline.
+
+### How it is enabled
+
+The web profile loads the client half automatically when the package declares
+`dsh.client` and `exports["./client"]`. Install and run the web profile:
+
+```bash
+dsh plugin --profile web add ./path/to/dsh-git-workspace
+dsh --profile web
+```
+
+### Read-only
+
+The UI mirrors the backend: it inspects, searches, diffs, browses, opens, and
+refreshes. It does **not** stage, commit, push, checkout, merge, or create PRs.
+Stage/commit controls are deliberately deferred to a future mutation phase.
+
 ### Installation
 
 Install the published npm package:
@@ -90,7 +124,6 @@ The package declares the official bundle manifest:
 ### GitHub CLI setup
 
 The `github_*` tools require the local `gh` CLI. They do not implement OAuth or GitHub API authentication:
-
 ```bash
 gh auth login
 gh auth status
@@ -300,6 +333,6 @@ make pack
 
 ### Roadmap
 
+- ✅ Git Workspace UI (read-only): compact tool cards + persistent workspace panel
 - Phase 2 mutation (currently not implemented): `git_branch_create`, `git_stage`, `git_unstage`, `git_commit`, `git_push`, `git_checkout`, `git_merge`, `github_pr_create`, `github_pr_merge`, `github_pr_comment`, `github_pr_review`
-- Git Diff Viewer UI
-- PR and commit relationship views
+- Stage / commit / PR controls wired into the Git Workspace panel (future mutation)

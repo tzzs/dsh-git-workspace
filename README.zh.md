@@ -59,6 +59,40 @@ Version 1 仍然保持 **只读**。不执行 commit、push、checkout、stage�
 | `github_issue_comments` | 读取 issue 的对话评论 |
 | `github_releases` | GitHub releases，含 tag、日期与 URL |
 
+## Git Workspace UI
+
+> 详见 [docs/ui.md](docs/ui.md)（UI 架构）与 [docs/dsh-ui-api.md](docs/dsh-ui-api.md)（DSH Web UI 扩展 API）。
+
+该插件还附带一个浏览器端，将后端 Tool 转换为 DeepSeek Harness Web UI 中
+紧凑、持续存在的 **Git Workspace**。
+
+### 功能
+
+- **紧凑 Tool 卡片** — Agent 每次调用 `git_*` / `github_*` 都会在对话中渲染为
+  Git Workspace 卡片（branch、ahead/behind、changes、commits、PR、CI），
+  而不是原始 JSON。
+- **持续存在的 Git Workspace 面板** — 侧边栏底部操作（“Git Workspace”）
+  打开一个浮动面板，展示当前 workspace 概览：当前 branch、upstream、
+  按状态分组的 changes、commits、PR 与 CI checks。
+- **共享上下文** — Agent 与 UI 消费同一套 `git_*` Tool，看到的是同一份 Git
+  状态，没有独立的前端数据管道。
+
+### 启用方式
+
+当包声明了 `dsh.client` 与 `exports["./client"]` 时，web profile 会自动加载
+浏览器端。安装并运行 web profile：
+
+```bash
+dsh plugin --profile web add ./path/to/dsh-git-workspace
+dsh --profile web
+```
+
+### 只读
+
+UI 与后端一致：支持 inspect、search、diff、browse、open、refresh。**不会**
+stage、commit、push、checkout、merge 或创建 PR。stage / commit 控件将在未来
+mutation 阶段加入。
+
 ### 安装
 
 安装已发布的 npm 包：
@@ -290,8 +324,8 @@ make pack
 
 ### Roadmap
 
+- ✅ Git Workspace UI（只读）：紧凑 Tool 卡片 + 持续存在的 workspace 面板
 - 第二阶段 mutation（暂未实现）：`git_branch_create`、`git_stage`、`git_unstage`、`git_commit`、`git_push`、`git_checkout`、`git_merge`、`github_pr_create`、`github_pr_merge`、`github_pr_comment`、`github_pr_review`
-- Git Diff Viewer UI
-- PR 与 commit 关联视图
+- 将 stage / commit / PR 控件接入 Git Workspace 面板（未来 mutation）
 
 ---

@@ -1,10 +1,22 @@
 {
   "name": "@tzzs/dsh-git-workspace",
   "version": "0.1.0",
-  "description": "Read-only Git and GitHub workspace tools for DeepSeek Harness",
+  "description": "Read-only Git and GitHub workspace tools plus a Web Git Workspace UI for DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": "./lib/invariant.d.ts",
+    "./client": {
+      "types": "./lib/client/index.d.ts",
+      "default": "./lib/client/client.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "lib",
     "cordis.patch.yml",
@@ -13,7 +25,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
     "test": "npm run build && node --test tests/*.test.js",
     "check": "npm test",
     "prepack": "npm run build"
@@ -22,6 +34,16 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
     }
   },
   "peerDependencies": {
