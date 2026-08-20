@@ -71,9 +71,9 @@ Version 1 仍然保持 **只读**。不执行 commit、push、checkout、stage�
 - **紧凑 Tool 卡片** — Agent 每次调用 `git_*` / `github_*` 都会在对话中渲染为
   Git Workspace 卡片（branch、ahead/behind、changes、commits、PR、CI），
   而不是原始 JSON。
-- **持续存在的 Git Workspace 面板** — 侧边栏底部操作（“Git Workspace”）
-  打开一个浮动面板，展示当前 workspace 概览：当前 branch、upstream、
-  按状态分组的 changes、commits、PR 与 CI checks。
+- **持续存在的 Git Workspace 面板** — 会话标题栏操作区中的按钮（“Git
+  Workspace”）打开一个浮动面板，展示当前 workspace 概览：当前 branch、
+  upstream、按状态分组的 changes、commits、PR 与 CI checks。
 - **共享上下文** — Agent 与 UI 消费同一套 `git_*` Tool，看到的是同一份 Git
   状态，没有独立的前端数据管道。
 

@@ -20,7 +20,7 @@ const React = {
   useCallback: (fn) => fn,
 }
 
-function loadBundle() {
+function loadBundle(reactMock = React) {
   const prev = globalThis.window
   const loaded = []
   globalThis.window = { __ModuleLoader__: { load: (x) => loaded.push(x) } }
@@ -30,10 +30,10 @@ function loadBundle() {
   else globalThis.window = prev
   const entry = loaded[0]
   const plugin = entry.factory((spec) => {
-    if (spec === 'react' || spec === 'react/jsx-runtime') return React
+    if (spec === 'react' || spec === 'react/jsx-runtime') return reactMock
     throw new Error('unexpected external: ' + spec)
   })
-  return { plugin, React }
+  return { plugin, React: reactMock }
 }
 
 function collectRegistrations(plugin) {
@@ -80,15 +80,15 @@ test('client registers a toolview for every Git/GitHub tool', () => {
   assert.deepEqual(keys, expected)
 })
 
-test('client registers the Git Workspace overlay and sidebar footer action', () => {
+test('client registers the Git Workspace overlay and session header action', () => {
   const { plugin } = loadBundle()
   const regs = collectRegistrations(plugin)
   const overlay = regs.find((r) => r.def.name === 'shell.overlay')
   assert.ok(overlay, 'shell.overlay registered')
   assert.equal(overlay.def.id, 'git-workspace-panel')
-  const footer = regs.find((r) => r.def.name === 'sidebar.footer.action')
-  assert.ok(footer, 'sidebar.footer.action registered')
-  assert.equal(footer.def.id, 'git-workspace')
+  const header = regs.find((r) => r.def.name === 'conversation.session.header.actions')
+  assert.ok(header, 'conversation.session.header.actions registered')
+  assert.equal(header.def.id, 'git-workspace')
 })
 
 function settledBlock(meta, isError = false) {
@@ -163,10 +163,49 @@ test('Git Workspace panel returns null when closed', () => {
   assert.equal(tree, null)
 })
 
-test('Git Workspace footer action renders', () => {
+test('Git Workspace header action renders', () => {
   const { plugin } = loadBundle()
   const regs = collectRegistrations(plugin)
-  const footerComp = regs.find((r) => r.def.id === 'git-workspace').comp
-  const tree = footerComp({ wide: true })
-  assert.ok(tree.type, 'footer action renders an element')
+  const headerComp = regs.find((r) => r.def.id === 'git-workspace').comp
+  const tree = headerComp({})
+  assert.ok(tree.type, 'header action renders an element')
+})
+
+test('Git Workspace panel reads conversation data from the session binding', () => {
+  const openReact = { ...React, useState: (init) => [true, () => {}] }
+  const { plugin } = loadBundle(openReact)
+  const regs = collectRegistrations(plugin)
+  const container = regs.find((r) => r.def.id === 'git-workspace-panel').comp
+
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 2, behind: 1 },
+          changes: { modified: 3, staged: 1, deleted: 0, renamed: 0, untracked: 2 },
+          clean: false,
+          pullRequest: null,
+          ci: null,
+        },
+      },
+    ],
+  }
+  const sessions = {
+    binding: () => ({ session: { getSnapshot: () => conversation, subscribe: () => () => {} } }),
+  }
+  const tree = container({
+    useSessions: (sel) => sel({ current: 's1' }),
+    sessions,
+  })
+  assert.ok(tree, 'panel renders when open')
+  assert.ok(tree.type, 'panel renders a component')
+  assert.equal(tree.props.data.repository.name, 'repo')
+  assert.equal(tree.props.data.branch.name, 'feature/x')
+  assert.equal(tree.props.data.branch.ahead, 2)
 })

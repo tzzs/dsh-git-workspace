@@ -41,11 +41,11 @@ window.__ModuleLoader__.load({
    - `github_ci` → check states
    - all others → a generic compact text card
 
-2. **`shell.overlay`** (list, root scope) + **`sidebar.footer.action`** (list,
-   root scope) — a persistent Git Workspace explorer. A sidebar foot action
-   ("Git Workspace") toggles a floating panel that shows the live workspace
-   summary (branch, changes, commits, PR, CI) sourced from the current
-   session's tool results.
+2. **`shell.overlay`** (list, root scope) + **`conversation.session.header.actions`**
+   (list, session scope) — a persistent Git Workspace explorer. A button in the
+   session header's action row ("Git Workspace") toggles a floating panel that
+   shows the live workspace summary (branch, changes, commits, PR, CI) sourced
+   from the current session's tool results.
 
 ## Component structure
 
@@ -64,7 +64,7 @@ src/client/
 │   ├── ci-row.js
 │   └── generic-row.js
 └── panel/                    # persistent Git Workspace explorer
-    ├── container.js          # session-data container + sidebar footer action
+    ├── container.js          # session-data container + session header action
     ├── workspace-panel.js    # floating panel UI (shell.overlay)
     └── panel-store.js        # tiny open/close store
 ```

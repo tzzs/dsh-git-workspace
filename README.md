@@ -71,9 +71,10 @@ compact, persistent **Git Workspace** inside the DeepSeek Harness Web UI.
 - **Compact tool cards** — every `git_*` / `github_*` call the Agent makes
   renders as a Git Workspace card in the conversation (branch, ahead/behind,
   changes, commits, PR, CI) instead of raw JSON.
-- **Persistent Git Workspace panel** — a sidebar foot action ("Git Workspace")
-  opens a floating panel showing the live workspace summary: current branch,
-  upstream, changes grouped by status, commits, PR, and CI checks.
+- **Persistent Git Workspace panel** — a button in the session header's action
+  row ("Git Workspace") opens a floating panel showing the live workspace
+  summary: current branch, upstream, changes grouped by status, commits, PR,
+  and CI checks.
 - **Shared context** — the Agent and the UI consume the same `git_*` tools, so
   both see the same Git state. There is no separate frontend data pipeline.
 

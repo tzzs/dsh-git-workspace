@@ -144,7 +144,7 @@ Slot inventory (declared in `@deepseek-ai/dsh-client-ui-slots`):
 | `sidebar` | single | root | Occupied; replacing removes inner seats |
 | `sidebar.workspaces` | single | root | Occupied by ui-workspace |
 | `sidebar.settings` | single | root | Occupied by ui-settings |
-| `sidebar.footer.action` | **list** | root | **Additive** — this plugin's "Git Workspace" foot action |
+| `conversation.session.header.actions` | **list** | session | **Additive** — this plugin's "Git Workspace" header action |
 | `shell.overlay` | **list** | root | **Additive** — this plugin's Git Workspace panel |
 | `details` | single | session | Occupied by ui-conversation |
 | `conversation.*`, `settings.*` | various | — | Conversation / settings internals |

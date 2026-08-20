@@ -7,7 +7,7 @@ import { ShowRow } from './toolview/show-row.js'
 import { PrRow } from './toolview/pr-row.js'
 import { CiRow } from './toolview/ci-row.js'
 import { GenericRow } from './toolview/generic-row.js'
-import { GitWorkspaceContainer, GitWorkspaceFooterAction } from './panel/container.js'
+import { GitWorkspaceContainer, GitWorkspaceHeaderAction } from './panel/container.js'
 
 export const inject = ['slots', 'sessions', 'connection', 'layout']
 
@@ -53,26 +53,27 @@ export function apply(ctx) {
         {
           name: 'shell.overlay',
           id: 'git-workspace-panel',
+          inject: () => ({ sessions: ctx.sessions }),
         },
         GitWorkspaceContainer,
       ),
     )
 
-    const footerDisposer = ctx.slots.inject('sidebar.footer.action', () =>
+    const headerDisposer = ctx.slots.inject('conversation.session.header.actions', () =>
       ctx.slots.register(
         {
-          name: 'sidebar.footer.action',
+          name: 'conversation.session.header.actions',
           id: 'git-workspace',
           order: 10,
         },
-        GitWorkspaceFooterAction,
+        GitWorkspaceHeaderAction,
       ),
     )
 
     return () => {
       disposers.forEach((d) => d())
       overlayDisposer()
-      footerDisposer()
+      headerDisposer()
     }
   }, 'dsh-git-workspace: ui')
 }
