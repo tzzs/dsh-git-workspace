@@ -195,3 +195,32 @@ test('Git Workspace header action renders the panel open with conversation data'
   assert.equal(panel.props.data.branch.name, 'feature/x')
   assert.equal(panel.props.data.branch.ahead, 2)
 })
+
+test('Git Workspace panel tolerates a git_status meta without a changes summary', () => {
+  const openReact = { ...React, useState: (init) => [true, () => {}] }
+  const { plugin } = loadBundle(openReact)
+  const regs = collectRegistrations(plugin)
+  const headerComp = regs.find((r) => r.def.id === 'git-workspace').comp
+
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_status', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          branch: { name: 'discus', upstream: 'origin/discus', ahead: 0, behind: 0 },
+          files: [{ path: 'a.ts', status: 'modified' }],
+        },
+      },
+    ],
+  }
+  const tree = headerComp({ useSession: (sel) => sel(conversation) })
+  assert.ok(tree.children, 'returns a fragment')
+  assert.equal(tree.children.length, 2, 'toggle + panel render while open')
+  const panel = tree.children[1]
+  assert.equal(panel.props.data.branch.name, 'discus')
+  assert.equal(panel.props.data.changes, null, 'git_status carries no changes summary')
+})

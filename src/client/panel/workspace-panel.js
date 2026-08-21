@@ -36,6 +36,9 @@ function ChangesSection({ changes, clean }) {
   if (clean) {
     return React.createElement(Row, null, React.createElement(Stat, { text: '✓ clean', color: 'var(--dsw-alias-state-success-primary)' }))
   }
+  if (!changes) {
+    return React.createElement(Row, null, React.createElement(Muted, null, 'No change summary'))
+  }
   const chips = []
   if (changes.modified) chips.push(React.createElement(Stat, { key: 'm', text: `${changes.modified} modified` }))
   if (changes.staged) chips.push(React.createElement(Stat, { key: 's', text: `${changes.staged} staged`, color: 'var(--dsw-alias-state-success-primary)' }))
