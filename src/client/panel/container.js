@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { GitWorkspacePanel } from './workspace-panel.js'
-import { isOpen, subscribe, toggle } from './panel-store.js'
-// Scan a ConversationSnapshot's nodes for the latest tool-result node carrying
+
+// Find the latest tool-result node in a ConversationSnapshot carrying
 // presentation meta for the given tool name.
 function findToolResult(snapshot, toolName) {
   if (!snapshot || !Array.isArray(snapshot.nodes)) return null
@@ -34,67 +34,35 @@ function extractWorkspaceData(meta) {
   }
 }
 
-export function GitWorkspaceContainer({ useSession, useSessions, sessions }) {
-  const [open, setOpenState] = React.useState(isOpen())
+// One session-scoped component: the header "Git Workspace" toggle plus, when
+// open, a floating panel. Session scope provides `useSession`, which reads the
+// live ConversationSnapshot — the same source the tool cards render from.
+export function GitWorkspaceHeaderAction({ useSession }) {
+  const [open, setOpen] = React.useState(false)
   const [tick, setTick] = React.useState(0)
 
-  React.useEffect(() => subscribe(setOpenState), [])
-
-  // Root-scope slot: read the current session id via useSessions. If a
-  // session-scope useSession hook is ever provided, fall back to its id.
-  const current = useSessions
-    ? useSessions((s) => s.current)
-    : useSession
-      ? useSession((s) => s.sessionId)
-      : undefined
-
-  // Subscribe to the current session's conversation so the panel reflects new
-  // tool results as the Agent works.
-  React.useEffect(() => {
-    if (!sessions || !current) return
-    const face = sessions.binding(current)?.session
-    if (!face) return
-    return face.subscribe(() => setTick((n) => n + 1))
-  }, [sessions, current])
-
-  const snapshot = React.useMemo(() => {
-    if (!sessions || !current) return null
-    try {
-      return sessions.binding(current)?.session?.getSnapshot() ?? null
-    } catch {
-      return null
-    }
-  }, [sessions, current, tick])
+  const snapshot = useSession ? useSession((s) => s) : null
 
   const meta = React.useMemo(
-    () => findToolResult(snapshot, 'git_workspace') || findToolResult(snapshot, 'git_status'),
-    [snapshot],
+    () =>
+      findToolResult(snapshot, 'git_workspace') ||
+      findToolResult(snapshot, 'git_status'),
+    [snapshot, tick],
   )
-
   const data = React.useMemo(() => extractWorkspaceData(meta), [meta])
 
-  const onRefresh = React.useCallback(() => setTick((n) => n + 1), [])
+  const toggle = React.useCallback(() => setOpen((v) => !v), [])
+  const refresh = React.useCallback(() => setTick((n) => n + 1), [])
 
-  if (!open) return null
-  return React.createElement(GitWorkspacePanel, {
-    data,
-    loading: false,
-    onRefresh,
-    onClose: () => setOpenState(false),
-  })
-}
-
-export function GitWorkspaceHeaderAction() {
-  const [open, setOpenState] = React.useState(isOpen())
-  React.useEffect(() => subscribe(setOpenState), [])
-  return React.createElement(
+  const button = React.createElement(
     'button',
     {
       type: 'button',
       onClick: toggle,
       title: 'Git Workspace',
       'aria-label': 'Git Workspace',
-      'aria-pressed': open,
+      'aria-haspopup': 'dialog',
+      'aria-expanded': open,
       style: {
         display: 'inline-flex',
         alignItems: 'center',
@@ -109,9 +77,24 @@ export function GitWorkspaceHeaderAction() {
         fontFamily: 'var(--dsw-font-family)',
         fontSize: '12px',
         lineHeight: '24px',
+        whiteSpace: 'nowrap',
       },
     },
     React.createElement('span', null, '⑃'),
     React.createElement('span', null, 'Git'),
   )
+
+  const children = open
+    ? [
+        button,
+        React.createElement(GitWorkspacePanel, {
+          data,
+          loading: false,
+          onRefresh: refresh,
+          onClose: () => setOpen(false),
+        }),
+      ]
+    : [button]
+
+  return React.createElement(React.Fragment, null, ...children)
 }

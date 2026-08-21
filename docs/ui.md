@@ -41,11 +41,13 @@ window.__ModuleLoader__.load({
    - `github_ci` → check states
    - all others → a generic compact text card
 
-2. **`shell.overlay`** (list, root scope) + **`conversation.session.header.actions`**
-   (list, session scope) — a persistent Git Workspace explorer. A button in the
-   session header's action row ("Git Workspace") toggles a floating panel that
-   shows the live workspace summary (branch, changes, commits, PR, CI) sourced
-   from the current session's tool results.
+2. **`conversation.session.header.actions`** (list, session scope) — a
+   persistent Git Workspace explorer. A button in the session header's action
+   row ("Git Workspace") toggles a floating panel that shows the live workspace
+   summary (branch, changes, commits, PR, CI). The header action is
+   session-scoped, so it reads the current session's conversation directly via
+   the framework `useSession` hook — the same snapshot the tool cards render
+   from.
 
 ## Component structure
 
@@ -63,10 +65,9 @@ src/client/
 │   ├── pr-row.js
 │   ├── ci-row.js
 │   └── generic-row.js
-└── panel/                    # persistent Git Workspace explorer
-    ├── container.js          # session-data container + session header action
-    ├── workspace-panel.js    # floating panel UI (shell.overlay)
-    └── panel-store.js        # tiny open/close store
+└── panel/                    # persistent Git Workspace explorer (header action)
+    ├── container.js          # session-scoped header action + floating panel
+    └── workspace-panel.js    # floating panel UI
 ```
 
 ## Data flow
@@ -87,7 +88,7 @@ session  tool-result node carries { content, meta }
         │
         ▼
 client   tool.call.toolview card reads block.meta and renders compact UI
-shell.overlay panel reads the same meta from the current session
+header action panel reads the same meta via useSession (ConversationSnapshot)
 ```
 
 The **Agent and the UI share one Git context**: the Agent consumes the same
@@ -100,9 +101,9 @@ State is intentionally lightweight:
 
 - Each toolview card is a pure function of its frozen `block` (`RunningToolCall`
   or `ToolResultNode`). No store needed.
-- The persistent panel keeps only `open` (a tiny module store) and a local
-  `refreshing` flag. All data is read from the session snapshot via the
-  framework's `useSessions`/`useSession` hooks.
+- The panel keeps only `open` (local React state) and a `refresh` tick. All
+  data is read from the session conversation snapshot via the framework's
+  `useSession` hook.
 
 ## Loading / empty / error states
 

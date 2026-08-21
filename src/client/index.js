@@ -7,73 +7,70 @@ import { ShowRow } from './toolview/show-row.js'
 import { PrRow } from './toolview/pr-row.js'
 import { CiRow } from './toolview/ci-row.js'
 import { GenericRow } from './toolview/generic-row.js'
-import { GitWorkspaceContainer, GitWorkspaceHeaderAction } from './panel/container.js'
+import { GitWorkspaceHeaderAction } from './panel/container.js'
 
 export const inject = ['slots', 'sessions', 'connection', 'layout']
 
+const TOOLVIEW = [
+  ['git_workspace', GitWorkspaceRow],
+  ['git_status', StatusRow],
+  ['git_diff', DiffRow],
+  ['git_commits', CommitsRow],
+  ['git_show', ShowRow],
+  ['github_pr', PrRow],
+  ['github_ci', CiRow],
+  ['git_files', GenericRow],
+  ['git_compare', GenericRow],
+  ['git_blame', GenericRow],
+  ['git_branches', GenericRow],
+  ['git_remotes', GenericRow],
+  ['git_worktrees', GenericRow],
+  ['git_stash', GenericRow],
+  ['git_tags', GenericRow],
+  ['github_pr_diff', GenericRow],
+  ['github_pr_reviews', GenericRow],
+  ['github_pr_comments', GenericRow],
+  ['github_ci_logs', GenericRow],
+  ['github_issue', GenericRow],
+  ['github_issue_comments', GenericRow],
+  ['github_releases', GenericRow],
+]
+
+// Register into a slot, isolating failures so one bad slot never removes the
+// rest of the plugin's contributions (each slots.inject defers until the slot
+// is declared; a throwing callback would otherwise tear down the whole fiber).
+function safeInject(ctx, slot, def, component) {
+  try {
+    return ctx.slots.inject(slot, () =>
+      ctx.slots.register(def, component),
+    )
+  } catch (error) {
+    if (typeof console !== 'undefined') {
+      console.error(`[dsh-git-workspace] failed to register ${slot}:`, error)
+    }
+    return () => {}
+  }
+}
+
 export function apply(ctx) {
   ctx.effect(() => {
-    const register = (name, Component) =>
-      ctx.slots.inject('tool.call.toolview', () =>
-        ctx.slots.register(
-          {
-            name: 'tool.call.toolview',
-            key: name,
-          },
-          Component,
-        ),
+    const disposers = []
+
+    for (const [name, component] of TOOLVIEW) {
+      disposers.push(
+        safeInject(ctx, 'tool.call.toolview', { name: 'tool.call.toolview', key: name }, component),
       )
-    const disposers = [
-      register('git_workspace', GitWorkspaceRow),
-      register('git_status', StatusRow),
-      register('git_diff', DiffRow),
-      register('git_commits', CommitsRow),
-      register('git_show', ShowRow),
-      register('github_pr', PrRow),
-      register('github_ci', CiRow),
-      register('git_files', GenericRow),
-      register('git_compare', GenericRow),
-      register('git_blame', GenericRow),
-      register('git_branches', GenericRow),
-      register('git_remotes', GenericRow),
-      register('git_worktrees', GenericRow),
-      register('git_stash', GenericRow),
-      register('git_tags', GenericRow),
-      register('github_pr_diff', GenericRow),
-      register('github_pr_reviews', GenericRow),
-      register('github_pr_comments', GenericRow),
-      register('github_ci_logs', GenericRow),
-      register('github_issue', GenericRow),
-      register('github_issue_comments', GenericRow),
-      register('github_releases', GenericRow),
-    ]
+    }
 
-    const overlayDisposer = ctx.slots.inject('shell.overlay', () =>
-      ctx.slots.register(
-        {
-          name: 'shell.overlay',
-          id: 'git-workspace-panel',
-          inject: () => ({ sessions: ctx.sessions }),
-        },
-        GitWorkspaceContainer,
-      ),
-    )
-
-    const headerDisposer = ctx.slots.inject('conversation.session.header.actions', () =>
-      ctx.slots.register(
-        {
-          name: 'conversation.session.header.actions',
-          id: 'git-workspace',
-          order: 10,
-        },
+    disposers.push(
+      safeInject(
+        ctx,
+        'conversation.session.header.actions',
+        { name: 'conversation.session.header.actions', id: 'git-workspace', order: 10 },
         GitWorkspaceHeaderAction,
       ),
     )
 
-    return () => {
-      disposers.forEach((d) => d())
-      overlayDisposer()
-      headerDisposer()
-    }
+    return () => disposers.forEach((d) => d())
   }, 'dsh-git-workspace: ui')
 }

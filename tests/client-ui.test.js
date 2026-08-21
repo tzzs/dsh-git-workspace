@@ -11,7 +11,7 @@ const React = {
   createElement: (type, props, ...children) => ({
     type,
     props,
-    children: children.length === 1 ? children[0] : children,
+    children,
   }),
   Fragment: Symbol('Fragment'),
   useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
@@ -80,12 +80,9 @@ test('client registers a toolview for every Git/GitHub tool', () => {
   assert.deepEqual(keys, expected)
 })
 
-test('client registers the Git Workspace overlay and session header action', () => {
+test('client registers the Git Workspace session header action', () => {
   const { plugin } = loadBundle()
   const regs = collectRegistrations(plugin)
-  const overlay = regs.find((r) => r.def.name === 'shell.overlay')
-  assert.ok(overlay, 'shell.overlay registered')
-  assert.equal(overlay.def.id, 'git-workspace-panel')
   const header = regs.find((r) => r.def.name === 'conversation.session.header.actions')
   assert.ok(header, 'conversation.session.header.actions registered')
   assert.equal(header.def.id, 'git-workspace')
@@ -155,27 +152,21 @@ test('cards render empty state when no meta', () => {
   assert.ok(tree.type)
 })
 
-test('Git Workspace panel returns null when closed', () => {
-  const { plugin } = loadBundle()
-  const regs = collectRegistrations(plugin)
-  const panelComp = regs.find((r) => r.def.id === 'git-workspace-panel').comp
-  const tree = panelComp({ useSession: () => null, useSessions: () => null })
-  assert.equal(tree, null)
-})
-
-test('Git Workspace header action renders', () => {
+test('Git Workspace header action renders a closed toggle', () => {
   const { plugin } = loadBundle()
   const regs = collectRegistrations(plugin)
   const headerComp = regs.find((r) => r.def.id === 'git-workspace').comp
-  const tree = headerComp({})
-  assert.ok(tree.type, 'header action renders an element')
+  const tree = headerComp({ useSession: () => null })
+  assert.ok(tree.children, 'returns a fragment')
+  assert.equal(tree.children.length, 1, 'only the toggle renders while closed')
+  assert.equal(tree.children[0].type, 'button')
 })
 
-test('Git Workspace panel reads conversation data from the session binding', () => {
+test('Git Workspace header action renders the panel open with conversation data', () => {
   const openReact = { ...React, useState: (init) => [true, () => {}] }
   const { plugin } = loadBundle(openReact)
   const regs = collectRegistrations(plugin)
-  const container = regs.find((r) => r.def.id === 'git-workspace-panel').comp
+  const headerComp = regs.find((r) => r.def.id === 'git-workspace').comp
 
   const conversation = {
     nodes: [
@@ -196,16 +187,11 @@ test('Git Workspace panel reads conversation data from the session binding', () 
       },
     ],
   }
-  const sessions = {
-    binding: () => ({ session: { getSnapshot: () => conversation, subscribe: () => () => {} } }),
-  }
-  const tree = container({
-    useSessions: (sel) => sel({ current: 's1' }),
-    sessions,
-  })
-  assert.ok(tree, 'panel renders when open')
-  assert.ok(tree.type, 'panel renders a component')
-  assert.equal(tree.props.data.repository.name, 'repo')
-  assert.equal(tree.props.data.branch.name, 'feature/x')
-  assert.equal(tree.props.data.branch.ahead, 2)
+  const tree = headerComp({ useSession: (sel) => sel(conversation) })
+  assert.ok(tree.children, 'returns a fragment')
+  assert.equal(tree.children.length, 2, 'toggle + panel render while open')
+  const panel = tree.children[1]
+  assert.equal(panel.props.data.repository.name, 'repo')
+  assert.equal(panel.props.data.branch.name, 'feature/x')
+  assert.equal(panel.props.data.branch.ahead, 2)
 })
