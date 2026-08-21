@@ -1,4 +1,3 @@
-import * as React from 'react'
 import { GitWorkspaceRow } from './toolview/workspace-row.js'
 import { StatusRow } from './toolview/status-row.js'
 import { DiffRow } from './toolview/diff-row.js'
@@ -9,7 +8,11 @@ import { CiRow } from './toolview/ci-row.js'
 import { GenericRow } from './toolview/generic-row.js'
 import { GitWorkspaceHeaderAction } from './panel/container.js'
 
-export const inject = ['slots', 'sessions', 'connection', 'layout']
+// Only the slot registry is needed to register the UI. The tool cards and the
+// header action receive their data (block / useSession) from the framework
+// slot props, not from injected services — so a minimal inject avoids fiber
+// materialization failures when a named service is absent.
+export const inject = ['slots']
 
 const TOOLVIEW = [
   ['git_workspace', GitWorkspaceRow],
@@ -36,41 +39,31 @@ const TOOLVIEW = [
   ['github_releases', GenericRow],
 ]
 
-// Register into a slot, isolating failures so one bad slot never removes the
-// rest of the plugin's contributions (each slots.inject defers until the slot
-// is declared; a throwing callback would otherwise tear down the whole fiber).
-function safeInject(ctx, slot, def, component) {
+// Guard one registration so a single failing slot can never tear down the
+// rest of the plugin's contributions.
+function registerSlot(ctx, slot, def, component) {
   try {
-    return ctx.slots.inject(slot, () =>
-      ctx.slots.register(def, component),
-    )
+    ctx.slots.inject(slot, () => ctx.slots.register(def, component))
   } catch (error) {
     if (typeof console !== 'undefined') {
       console.error(`[dsh-git-workspace] failed to register ${slot}:`, error)
     }
-    return () => {}
   }
 }
 
 export function apply(ctx) {
-  ctx.effect(() => {
-    const disposers = []
-
-    for (const [name, component] of TOOLVIEW) {
-      disposers.push(
-        safeInject(ctx, 'tool.call.toolview', { name: 'tool.call.toolview', key: name }, component),
-      )
-    }
-
-    disposers.push(
-      safeInject(
-        ctx,
-        'conversation.session.header.actions',
-        { name: 'conversation.session.header.actions', id: 'git-workspace', order: 10 },
-        GitWorkspaceHeaderAction,
-      ),
+  for (const [name, component] of TOOLVIEW) {
+    registerSlot(
+      ctx,
+      'tool.call.toolview',
+      { name: 'tool.call.toolview', key: name },
+      component,
     )
-
-    return () => disposers.forEach((d) => d())
-  }, 'dsh-git-workspace: ui')
+  }
+  registerSlot(
+    ctx,
+    'conversation.session.header.actions',
+    { name: 'conversation.session.header.actions', id: 'git-workspace', order: 10 },
+    GitWorkspaceHeaderAction,
+  )
 }
