@@ -81,11 +81,22 @@ compact, persistent **Git Workspace** inside the DeepSeek Harness Web UI.
 ### How it is enabled
 
 The web profile loads the client half automatically when the package declares
-`dsh.client` and `exports["./client"]`. Install and run the web profile:
+`dsh.client` and `exports["./client"]`. Install and run the web profile under
+**one** `DSH_HOME`. When `DSH_HOME` is unset the `dsh` CLI silently uses
+`~/.dsh`, so a profile installed under a different home boots without the
+client bundle (the boot manifest simply has no `@tzzs` entry — no error, no UI):
 
 ```bash
+export DSH_HOME="$HOME/.dsh-git-workspace"
 dsh plugin --profile web add ./path/to/dsh-git-workspace
 dsh --profile web
+```
+
+Confirm the client made it into the boot manifest before opening the browser:
+
+```bash
+curl -s http://127.0.0.1:PORT/ | grep -o '"id":"@tzzs[^}]*}'
+# "id":"@tzzs/dsh-git-workspace","url":"/plugins/@tzzs/dsh-git-workspace/client.js?rev=..."
 ```
 
 ### Read-only

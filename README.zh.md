@@ -80,11 +80,22 @@ Version 1 仍然保持 **只读**。不执行 commit、push、checkout、stage�
 ### 启用方式
 
 当包声明了 `dsh.client` 与 `exports["./client"]` 时，web profile 会自动加载
-浏览器端。安装并运行 web profile：
+浏览器端。请在**同一个** `DSH_HOME` 下安装并运行 web profile。当 `DSH_HOME`
+未设置时，`dsh` CLI 会静默使用 `~/.dsh`，因此在其他 home 下安装的 profile
+启动时不会带上 client bundle（boot manifest 里根本没有 `@tzzs` entry ——
+没有报错，也没有 UI）：
 
 ```bash
+export DSH_HOME="$HOME/.dsh-git-workspace"
 dsh plugin --profile web add ./path/to/dsh-git-workspace
 dsh --profile web
+```
+
+打开浏览器前先确认 client 已进入 boot manifest：
+
+```bash
+curl -s http://127.0.0.1:PORT/ | grep -o '"id":"@tzzs[^}]*}'
+# "id":"@tzzs/dsh-git-workspace","url":"/plugins/@tzzs/dsh-git-workspace/client.js?rev=..."
 ```
 
 ### 只读
