@@ -16,6 +16,18 @@ DSH_BIN ?= $(CURDIR)/.dsh-bin
 # development work on systems that provide pnpm through Corepack only.
 PNPM_SHIM = $(DSH_BIN)/pnpm
 DSH_ENV = PATH="$(DSH_BIN):$(PATH)" DSH_HOME="$(DSH_HOME)"
+PKG_NAME ?= @tzzs/dsh-git-workspace
+# Fail loud instead of booting a profile that cannot see the plugin. The dsh
+# CLI defaults DSH_HOME to ~/.dsh when the variable is unset, so a profile
+# installed under a different home boots without the client bundle (no entry in
+# the boot manifest, no error, no UI).
+define check-profile-includes-plugin
+	@if ! $(DSH_ENV) $(DSH) --profile "$(1)" --dump-config 2>/dev/null | grep -q "$(PKG_NAME)"; then \
+		echo "ERROR: $(PKG_NAME) is not in profile '$(1)' (DSH_HOME=$(DSH_HOME))." >&2; \
+		echo "  The dsh CLI defaults DSH_HOME to ~/.dsh when unset; run 'dsh plugin --profile $(1) add' under the SAME DSH_HOME." >&2; \
+		exit 1; \
+	fi
+endef
 
 help:
 	@echo "Available targets:"
@@ -72,6 +84,7 @@ local-run: local-install
 local-web: build $(PNPM_SHIM)
 	@mkdir -p "$(DSH_HOME)"
 	$(DSH_ENV) $(DSH) plugin --profile web add "$(CURDIR)"
+	$(call check-profile-includes-plugin,web)
 	$(DSH_ENV) $(DSH) --profile web --port 0
 
 local-pack: check
