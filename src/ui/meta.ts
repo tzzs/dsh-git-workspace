@@ -7,17 +7,37 @@ import type {
 } from '../types.js'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 
+export interface WorkspaceCommentMeta {
+  id: string
+  author: string
+  body: string
+  path: string | null
+  line: number | null
+  resolved: boolean
+  createdAt: string | null
+  url: string | null
+}
+
 export interface WorkspaceMeta {
   repository: { name: string; root: string; remote: string | null }
   branch: { name: string | null; upstream: string | null; ahead: number; behind: number }
   changes: { modified: number; staged: number; deleted: number; renamed: number; untracked: number }
   clean: boolean
+  files?: FileMeta[]
+  filesTruncated?: boolean
+  commits?: CommitMeta[]
+  branches?: Array<{ name: string; current: boolean; upstream: string | null; ahead: number; behind: number }>
+  stashCount?: number
+  additionsTotal?: number
+  deletionsTotal?: number
+  comparison?: { base: string | null; ahead: number; behind: number } | null
   pullRequest: {
     number: number
     title: string
     state: string
     draft: boolean
     url: string
+    comments?: WorkspaceCommentMeta[]
   } | null
   ci: { status: string; checks: CheckMeta[] } | null
 }
@@ -32,6 +52,8 @@ export interface FileMeta {
   oldPath: string | null
   status: string
   staged: boolean
+  additions?: number
+  deletions?: number
 }
 
 export interface DiffFileMeta {
@@ -104,12 +126,20 @@ export interface CiMeta {
 }
 
 function fileMeta(f: GitFile): FileMeta {
-  return {
+  const base: FileMeta = {
     path: f.path,
     oldPath: f.oldPath ?? null,
     status: f.status,
     staged: f.staged,
   }
+  if (typeof (f as { additions?: unknown }).additions === 'number') {
+    return {
+      ...base,
+      additions: (f as { additions?: number }).additions,
+      deletions: (f as { deletions?: number }).deletions,
+    }
+  }
+  return base
 }
 
 function diffFileMeta(f: DiffFile): DiffFileMeta {
@@ -149,7 +179,22 @@ export function toWorkspaceMeta(w: {
   repository: { name: string; root: string; remote: string | null }
   branch: { name: string | null; upstream: string | null; ahead: number; behind: number }
   workspace: { clean: boolean; modified: number; staged: number; deleted: number; renamed: number; untracked: number }
-  pullRequest: { number: number; title: string; state: string; draft: boolean; url: string } | null
+  files?: Array<GitFile & { additions?: number; deletions?: number }>
+  filesTruncated?: boolean
+  commits?: { ahead: number; recent: CommitSummary[] }
+  branches?: Array<{ name: string; current: boolean; upstream: string | null; ahead: number; behind: number }>
+  stashCount?: number
+  additionsTotal?: number
+  deletionsTotal?: number
+  comparison?: { base: string | null; ahead: number; behind: number } | null
+  pullRequest: {
+    number: number
+    title: string
+    state: string
+    draft: boolean
+    url: string
+    comments?: WorkspaceCommentMeta[]
+  } | null
   ci: { status: string; checks: CheckRun[] } | null
 }): WorkspaceMeta {
   return {
@@ -163,6 +208,13 @@ export function toWorkspaceMeta(w: {
       untracked: w.workspace.untracked,
     },
     clean: w.workspace.clean,
+    ...(w.files ? { files: w.files.map(fileMeta), filesTruncated: w.filesTruncated === true } : {}),
+    ...(w.commits ? { commits: w.commits.recent.map(commitMeta) } : {}),
+    ...(w.branches && w.branches.length ? { branches: w.branches } : {}),
+    ...(typeof w.stashCount === 'number' && w.stashCount > 0 ? { stashCount: w.stashCount } : {}),
+    ...(typeof w.additionsTotal === 'number' ? { additionsTotal: w.additionsTotal } : {}),
+    ...(typeof w.deletionsTotal === 'number' ? { deletionsTotal: w.deletionsTotal } : {}),
+    ...(w.comparison ? { comparison: w.comparison } : {}),
     pullRequest: w.pullRequest,
     ci: w.ci ? { status: w.ci.status, checks: w.ci.checks.map(checkMeta) } : null,
   }

@@ -1,8 +1,21 @@
 import * as React from 'react'
+import * as ReactDOM from 'react-dom'
+import { IconBranchOutline16, IconRefreshOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { GitWorkspacePanel } from './workspace-panel.js'
+import { Drawer } from './drawer.js'
+import { sessionPrompt } from '../services.js'
+import {
+  Dot,
+  IconBtn,
+  ensureStyles,
+  workspaceOverallState,
+} from '../components.js'
 
-// Find the latest tool-result node in a ConversationSnapshot carrying
-// presentation meta for the given tool name.
+const REFRESH_PROMPT =
+  'Run the git_workspace tool now and report the refreshed workspace summary.'
+
+const PROJECTION_KEY = 'tzzs.git-workspace'
+
 function findToolResult(snapshot, toolName) {
   if (!snapshot || !Array.isArray(snapshot.nodes)) return null
   let found = null
@@ -28,73 +41,137 @@ function extractWorkspaceData(meta) {
     changes: meta.changes || null,
     clean: meta.clean === true,
     files: meta.files || null,
+    filesTruncated: meta.filesTruncated === true,
     commits: meta.commits || null,
+    branches: meta.branches || null,
+    stashCount: typeof meta.stashCount === 'number' ? meta.stashCount : 0,
+    comparison: meta.comparison || null,
     pullRequest: meta.pullRequest || null,
     ci: meta.ci || null,
   }
 }
 
-// One session-scoped component: the header "Git Workspace" toggle plus, when
-// open, a floating panel. Session scope provides `useSession`, which reads the
-// live ConversationSnapshot — the same source the tool cards render from.
-export function GitWorkspaceHeaderAction({ useSession }) {
-  const [open, setOpen] = React.useState(false)
-  const [tick, setTick] = React.useState(0)
+function dirtyCount(data) {
+  if (!data) return 0
+  const c = data.changes
+  if (c && typeof c === 'object') {
+    return (
+      (c.modified || 0) + (c.staged || 0) + (c.deleted || 0) + (c.renamed || 0) + (c.untracked || 0)
+    )
+  }
+  return Array.isArray(data.files) ? data.files.length : 0
+}
 
+function extractProjected(value) {
+  if (!value || typeof value !== 'object' || !('error' in value)) {
+    return { data: extractWorkspaceData(value), errorText: null }
+  }
+  const e = value.error && typeof value.error === 'object' ? value.error : {}
+  return { data: null, errorText: e.message || e.code || 'workspace unavailable' }
+}
+
+export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
+  const [open, setOpen] = React.useState(false)
+  const [pending, setPending] = React.useState(false)
+
+  ensureStyles()
+  const projected =
+    typeof useProjection === 'function' ? useProjection(PROJECTION_KEY) : undefined
   const snapshot = useSession ? useSession((s) => s) : null
 
-  const meta = React.useMemo(
-    () =>
-      findToolResult(snapshot, 'git_workspace') ||
-      findToolResult(snapshot, 'git_status'),
-    [snapshot, tick],
-  )
-  const data = React.useMemo(() => extractWorkspaceData(meta), [meta])
+  const source = React.useMemo(() => {
+    if (projected !== undefined && projected !== null) return projected
+    return (
+      findToolResult(snapshot, 'git_workspace') || findToolResult(snapshot, 'git_status')
+    )
+  }, [projected, snapshot])
+  const { data, errorText } = React.useMemo(() => extractProjected(source), [source])
 
   const toggle = React.useCallback(() => setOpen((v) => !v), [])
-  const refresh = React.useCallback(() => setTick((n) => n + 1), [])
+  const close = React.useCallback(() => setOpen(false), [])
+
+  const refresh = React.useCallback(() => {
+    if (pending || !sessionId) return Promise.resolve(false)
+    setPending(true)
+    return sessionPrompt(sessionId, REFRESH_PROMPT).finally(() => setPending(false))
+  }, [pending, sessionId])
+
+  const dirty = dirtyCount(data)
+  const overall = workspaceOverallState(data)
 
   const button = React.createElement(
     'button',
     {
       type: 'button',
+      className: 'dgw-chip',
       onClick: toggle,
       title: 'Git Workspace',
       'aria-label': 'Git Workspace',
       'aria-haspopup': 'dialog',
       'aria-expanded': open,
-      style: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '6px',
-        height: '24px',
-        padding: '0 10px',
-        borderRadius: '999px',
-        border: '1px solid var(--dsw-alias-border-l2)',
-        background: open ? 'var(--dsw-alias-interactive-bg-hover-solid)' : 'var(--dsw-alias-bg-base)',
-        color: 'var(--dsw-alias-label-secondary)',
-        cursor: 'pointer',
-        fontFamily: 'var(--dsw-font-family)',
-        fontSize: '12px',
-        lineHeight: '24px',
-        whiteSpace: 'nowrap',
-      },
     },
-    React.createElement('span', null, '⑃'),
+    React.createElement(IconBranchOutline16, { size: 14 }),
     React.createElement('span', null, 'Git'),
+    dirty > 0
+      ? React.createElement(
+          'span',
+          {
+            style: {
+              minWidth: '16px',
+              height: '16px',
+              padding: '0 4px',
+              borderRadius: '999px',
+              background: 'var(--dsw-alias-state-warn-primary)',
+              color: 'var(--dsw-alias-bg-base)',
+              fontSize: '10px',
+              fontWeight: 600,
+              lineHeight: '16px',
+              textAlign: 'center',
+            },
+          },
+          dirty > 99 ? '99+' : String(dirty),
+        )
+      : null,
+    overall ? React.createElement(Dot, { state: overall, size: 8 }) : null,
   )
 
-  const children = open
-    ? [
-        button,
-        React.createElement(GitWorkspacePanel, {
-          data,
-          loading: false,
-          onRefresh: refresh,
-          onClose: () => setOpen(false),
-        }),
-      ]
-    : [button]
+  const subtitle = data
+    ? [data.repository && data.repository.name, data.branch && data.branch.name]
+        .filter(Boolean)
+        .join(' · ') || null
+    : null
 
-  return React.createElement(React.Fragment, null, ...children)
+  const drawer =
+    open && typeof document !== 'undefined'
+      ? ReactDOM.createPortal(
+          React.createElement(
+            Drawer,
+            {
+              open,
+              onClose: close,
+              title: 'Git Workspace',
+              subtitle,
+              actions: React.createElement(
+                IconBtn,
+                {
+                  label: pending ? 'Refresh requested…' : 'Refresh via agent (runs git_workspace)',
+                  onClick: refresh,
+                },
+                React.createElement(IconRefreshOutline14, { size: 14 }),
+              ),
+            },
+            React.createElement(GitWorkspacePanel, {
+              data,
+              errorText,
+              loading: false,
+              refreshing: pending,
+              canRefresh: Boolean(sessionId),
+              onRefresh: refresh,
+            }),
+          ),
+          document.body,
+        )
+      : null
+
+  return React.createElement(React.Fragment, null, ...(drawer ? [button, drawer] : [button]))
 }

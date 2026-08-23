@@ -1,17 +1,18 @@
 import * as React from 'react'
 import { Card, Row, Code, Muted, Stat, Add, Del } from '../components.js'
-import { blockMeta, firstLine } from '../common.js'
+import { blockMeta } from '../common.js'
 
 function CommitRow({ c }) {
   return React.createElement(
     Row,
-    null,
+    { className: 'dgw-row' },
     React.createElement(Code, null, c.shortSha),
     React.createElement(
       'span',
-      { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } },
-      firstLine(c.message),
+      { title: c.message, style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } },
+      (c.message || '').split('\n')[0],
     ),
+    React.createElement(Muted, null, c.author),
     React.createElement(
       'span',
       { style: { display: 'flex', gap: '6px', flex: 'none' } },
@@ -28,7 +29,7 @@ export function CommitsRow({ block }) {
     React.Fragment,
     null,
     React.createElement('span', { style: { fontWeight: 500 } }, 'Commits'),
-    React.createElement(Muted, null, `${commits.length}`),
+    React.createElement(Stat, { text: String(commits.length) }),
   )
   const body = React.createElement(
     React.Fragment,

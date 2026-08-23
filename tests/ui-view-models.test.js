@@ -16,6 +16,7 @@ import {
   truncatePath,
   checkIcon,
 } from '../lib/ui/view-models.js'
+import { toWorkspaceMeta } from '../lib/ui/meta.js'
 
 test('toGitFileVm maps status to label and staged/unstaged', () => {
   const m = toGitFileVm({ path: 'a.ts', status: 'modified', staged: true })
@@ -159,4 +160,48 @@ test('truncatePath keeps the file name', () => {
   const p = truncatePath('src/github/comments/review.ts', 20)
   assert.ok(p.includes('review.ts'))
   assert.ok(p.length <= 20 || p.startsWith('…/'))
+})
+
+test('toWorkspaceMeta carries files, commits, branches, stash and comparison', () => {
+  const m = toWorkspaceMeta({
+    repository: { name: 'repo', root: '/r', remote: null },
+    branch: { name: 'b', upstream: null, ahead: 0, behind: 0 },
+    workspace: { clean: false, modified: 1, staged: 1, deleted: 0, renamed: 0, untracked: 1 },
+    files: [
+      { path: 'a.ts', oldPath: null, status: 'modified', staged: false },
+      { path: 's.ts', oldPath: null, status: 'added', staged: true },
+    ],
+    filesTruncated: false,
+    commits: {
+      ahead: 2,
+      recent: [{ sha: 'x', shortSha: 'x1', message: 'm', author: 'a', date: 'd', files: { count: 1, additions: 2, deletions: 3 } }],
+    },
+    branches: [{ name: 'b', current: true, upstream: null, ahead: 0, behind: 0 }],
+    stashCount: 1,
+    comparison: { base: 'main', ahead: 2, behind: 0 },
+    pullRequest: null,
+    ci: null,
+  })
+  assert.equal(m.files.length, 2)
+  assert.equal(m.files[1].staged, true)
+  assert.equal(m.commits.length, 1)
+  assert.equal(m.commits[0].additions, 2)
+  assert.deepEqual(m.branches, [{ name: 'b', current: true, upstream: null, ahead: 0, behind: 0 }])
+  assert.equal(m.stashCount, 1)
+  assert.deepEqual(m.comparison, { base: 'main', ahead: 2, behind: 0 })
+})
+
+test('toWorkspaceMeta omits optional sections when absent', () => {
+  const m = toWorkspaceMeta({
+    repository: { name: 'r', root: '/r', remote: null },
+    branch: { name: 'main', upstream: null, ahead: 0, behind: 0 },
+    workspace: { clean: true, modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+    pullRequest: null,
+    ci: null,
+  })
+  assert.equal(m.files, undefined)
+  assert.equal(m.commits, undefined)
+  assert.equal(m.branches, undefined)
+  assert.equal(m.stashCount, undefined)
+  assert.equal(m.comparison, undefined)
 })

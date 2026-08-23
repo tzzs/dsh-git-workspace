@@ -1,15 +1,15 @@
 import * as React from 'react'
-import { Card, Row, Code, Stat, Muted, Add, Del, Path } from '../components.js'
-import { blockMeta, firstLine } from '../common.js'
+import { Card, Row, Stat, Muted, Add, Del, Path, CopyBtn } from '../components.js'
+import { blockMeta } from '../common.js'
 
 function FileRow({ file, openFile }) {
   const status = (file.status || 'M').toUpperCase()
   return React.createElement(
     Row,
-    null,
+    { className: 'dgw-row' },
     React.createElement(
       'span',
-      { style: { width: '18px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', fontWeight: 600 } },
+      { style: { width: '16px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', fontWeight: 600, textAlign: 'center' } },
       status,
     ),
     React.createElement(
@@ -23,6 +23,7 @@ function FileRow({ file, openFile }) {
       file.additions ? React.createElement(Add, null, `+${file.additions}`) : null,
       file.deletions ? React.createElement(Del, null, `-${file.deletions}`) : null,
       file.binary ? React.createElement(Muted, null, 'binary') : null,
+      React.createElement(CopyBtn, { text: file.path, label: 'Copy path' }),
     ),
   )
 }
@@ -37,11 +38,13 @@ export function DiffRow({ block, openFile }) {
     React.createElement('span', { style: { fontWeight: 500 } }, 'Diff'),
     stats
       ? React.createElement(
-          Muted,
+          Stat,
           null,
-          `${stats.files} files +${stats.additions} -${stats.deletions}`,
+          `${stats.files} files`,
         )
       : null,
+    stats ? React.createElement(Add, null, `+${stats.additions}`) : null,
+    stats ? React.createElement(Del, null, `-${stats.deletions}`) : null,
   )
   const body = React.createElement(
     React.Fragment,

@@ -85,7 +85,8 @@ local-web: build $(PNPM_SHIM)
 	@mkdir -p "$(DSH_HOME)"
 	$(DSH_ENV) $(DSH) plugin --profile web add "$(CURDIR)"
 	$(call check-profile-includes-plugin,web)
-	$(DSH_ENV) $(DSH) --profile web --port 0
+	@echo ""
+	@$(DSH_ENV) $(DSH) --profile web --port 0
 
 local-pack: check
 	$(NPM) pack

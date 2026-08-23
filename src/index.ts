@@ -1,4 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { Context } from '@deepseek-ai/cordis'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   ToolCallView,
@@ -47,6 +48,7 @@ import {
   genericResult,
   errorTitle,
 } from './presentation.js'
+import { installWorkspaceSampler } from './projection.js'
 
 export const name = '@tzzs/dsh-git-workspace'
 export const inject = ['tools']
@@ -138,7 +140,10 @@ function changeSummary(value: { files?: { length: number } }) {
   return `changes: ${value.files?.length ?? 0}`
 }
 
-export function apply(ctx: { tools: { register(tool: unknown): unknown } }) {
+export function apply(ctx: {
+  tools: { register(tool: unknown): unknown }
+} & Pick<Context, 'inject'>) {
+  installWorkspaceSampler(ctx)
   // ---- git_workspace -----------------------------------------------------
   register(ctx, {
     name: 'git_workspace',
