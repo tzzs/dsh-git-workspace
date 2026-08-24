@@ -38,7 +38,8 @@ function makePrimitivesStub() {
   const target = {}
   return new Proxy(target, {
     get(t, key) {
-      if (!(key in t)) t[key] = () => null
+      if (typeof key !== 'string') return undefined
+      if (!(key in t)) t[key] = Object.assign(() => null, { stubName: key })
       return t[key]
     },
   })
@@ -205,7 +206,7 @@ test('Git Workspace header action renders a closed toggle with badge and state d
   const tree = headerComp({ useSession: (sel) => sel(conversation), sessionId: 's1' })
   assert.ok(tree.children, 'returns a fragment')
   assert.equal(tree.children.length, 1, 'only the toggle renders while closed')
-  assert.equal(tree.children[0].type, 'button')
+  assert.equal(tree.children[0].type, 'button', 'toggle stays a plain button before the primitives swap')
   assert.equal(
     tree.children[0].children.some((c) => c && c.props && String(c.children) === '3'),
     true,
@@ -213,7 +214,7 @@ test('Git Workspace header action renders a closed toggle with badge and state d
   )
 })
 
-function renderHeader(conversation, { open = false, pending = false, sessionId = 's1', ctxExtras = {} } = {}) {
+function renderHeader(conversation, { open = false, pending = false, sessionId = 's1', ctxExtras = {}, compProps = {} } = {}) {
   const reactMock = open
     ? {
         ...React,
@@ -233,7 +234,7 @@ function renderHeader(conversation, { open = false, pending = false, sessionId =
   const { plugin } = loadBundle(reactMock)
   const { registrations } = collectRegistrations(plugin, ctxExtras)
   const headerComp = registrations.find((r) => r.def.id === 'git-workspace').comp
-  return headerComp({ useSession: (sel) => sel(conversation), sessionId })
+  return headerComp({ useSession: (sel) => sel(conversation), sessionId, ...compProps })
 }
 
 // Execute the Drawer component against its element props so the rendered
@@ -450,4 +451,109 @@ test('panel surfaces truncation hints and +N more rows', () => {
     }),
   ).join('\n')
   assert.ok(ciText.includes('+2 more'), 'ci card +N more renders')
+})
+
+
+function panelBodyText(tree) {
+  const { aside } = execDrawer(tree.children[1].el)
+  const panelEl = aside.children[2].children[0]
+  return collectText(panelEl.type(panelEl.props)).join('\n')
+}
+
+test('projection fills pull request data for a git_status-only session', () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_status', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          sampledAt: '2026-01-01T00:00:00.000Z',
+          branch: { name: 'feature/x', ahead: 0, behind: 0 },
+          files: [{ path: 'a.ts', status: 'modified' }],
+        },
+      },
+    ],
+  }
+  const projected = {
+    sampledAt: '2026-01-01T01:00:00.000Z',
+    repository: { name: 'repo' },
+    branch: { name: 'feature/x', ahead: 0, behind: 0 },
+    changes: { modified: 1, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+    clean: false,
+    pullRequest: { number: 42, title: 'Fix ui', state: 'OPEN', draft: false, url: 'https://example.test/pr/42' },
+    ci: null,
+  }
+  const tree = renderHeader(conversation, { open: true, compProps: { useProjection: () => projected } })
+  const text = panelBodyText(tree)
+  assert.ok(text.includes('PR #42'), 'pull request from the projection renders without a conversation')
+  assert.ok(text.includes('feature/x'), 'branch from the snapshots renders')
+})
+
+test('a fresher tool snapshot wins conflicts but keeps projection-only fields', () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          sampledAt: '2026-01-01T02:00:00.000Z',
+          repository: { name: 'repo' },
+          branch: { name: 'renamed-branch', ahead: 5, behind: 0 },
+          changes: { modified: 7, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: false,
+          files: [{ path: 'b.ts', status: 'modified' }],
+          pullRequest: null,
+          ci: null,
+        },
+      },
+    ],
+  }
+  const projected = {
+    sampledAt: '2026-01-01T01:00:00.000Z',
+    repository: { name: 'repo' },
+    branch: { name: 'stale-branch', ahead: 0, behind: 0 },
+    changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+    clean: true,
+    files: [],
+    pullRequest: { number: 7, title: 'Old pr', state: 'OPEN', draft: false, url: 'u' },
+    ci: null,
+  }
+  const tree = renderHeader(conversation, { open: true, compProps: { useProjection: () => projected } })
+  const text = panelBodyText(tree)
+  assert.ok(text.includes('renamed-branch'), 'fresher tool branch wins')
+  assert.ok(text.includes('PR #7'), 'projection still supplies the pull request the tool meta lacks')
+})
+
+test('projection error falls back to usable tool-result data', () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/last-known', ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: null,
+          ci: null,
+        },
+      },
+    ],
+  }
+  const tree = renderHeader(conversation, {
+    open: true,
+    compProps: { useProjection: () => ({ error: { code: 'NOT_A_GIT_REPOSITORY', message: 'not a repo' } }) },
+  })
+  const drawer = tree.children[1].el
+  assert.ok(drawer.props.subtitle.includes('feature/last-known'), 'last known tool data is shown')
 })

@@ -16,6 +16,41 @@ const REFRESH_PROMPT =
 
 const PROJECTION_KEY = 'tzzs.git-workspace'
 
+function sampleTime(meta) {
+  const t = meta && typeof meta.sampledAt === 'string' ? Date.parse(meta.sampledAt) : NaN
+  return Number.isNaN(t) ? 0 : t
+}
+
+// Field-level union of two snapshots: `primary` wins conflicts, `fallback`
+// fills fields the primary lacks (e.g. git_status meta has no pullRequest/ci).
+function mergeMeta(primary, fallback) {
+  if (!primary) return fallback || null
+  if (!fallback) return primary
+  const out = { ...fallback }
+  for (const [key, value] of Object.entries(primary)) {
+    if (value !== undefined && value !== null) out[key] = value
+  }
+  return out
+}
+
+// The projection is sampled locally on session/created + turn/end, so it is
+// the conversation-independent source; tool-result meta may be fresher when
+// the agent ran a tool mid-turn. Pick the newer snapshot as primary and
+// gap-fill from the other, preferring usable data over error payloads.
+function resolveSource(projected, toolResult) {
+  const projErr = Boolean(projected && typeof projected === 'object' && 'error' in projected)
+  const toolErr = Boolean(toolResult && typeof toolResult === 'object' && 'error' in toolResult)
+  const projData = projErr ? null : projected
+  const toolData = toolErr ? null : toolResult
+  if (projData && toolData) {
+    const primary = sampleTime(projData) >= sampleTime(toolData) ? projData : toolData
+    return mergeMeta(primary, primary === projData ? toolData : projData)
+  }
+  if (toolData) return toolData
+  if (projData) return projData
+  return projErr ? projected : toolResult || projected
+}
+
 function findToolResult(snapshot, toolName) {
   if (!snapshot || !Array.isArray(snapshot.nodes)) return null
   let found = null
@@ -82,9 +117,19 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
     typeof useProjection === 'function' ? useProjection(PROJECTION_KEY) : undefined
   const snapshot = useSession ? useSession((s) => s) : null
 
+  // Latch: the first payload (value or structured error) proves local
+  // sampling is alive — from then on the panel never auto-prompts the agent.
+  // A missing face yields undefined forever, so only the absence of any
+  // payload keeps the conversation fallback alive.
+  const [autoSampled, setAutoSampled] = React.useState(false)
+  React.useEffect(() => {
+    if (projected !== undefined && projected !== null) setAutoSampled(true)
+  }, [projected])
+
   const source = React.useMemo(() => {
-    const toolResult = findToolResult(snapshot, 'git_workspace') || findToolResult(snapshot, 'git_status')
-    return toolResult || projected
+    const toolResult =
+      findToolResult(snapshot, 'git_workspace') || findToolResult(snapshot, 'git_status')
+    return resolveSource(projected ?? null, toolResult)
   }, [projected, snapshot])
   const { data, errorText } = React.useMemo(() => extractProjected(source), [source])
 
@@ -102,18 +147,23 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
     [sessionId],
   )
 
-  // Auto-sample once per open when the session has no workspace data yet.
+  // Fallback-only auto-sample: when no projection payload exists at all
+  // (headless CLI or broken sampling), ask the agent once per open after a
+  // short grace so a slow first sample never triggers a pointless prompt.
   const autoOpenRef = React.useRef(false)
   React.useEffect(() => {
     if (!open) {
       autoOpenRef.current = false
       return
     }
-    if (autoOpenRef.current || pending || !sessionId) return
+    if (autoSampled || autoOpenRef.current || pending || !sessionId) return
     if (data !== null || errorText) return
-    autoOpenRef.current = true
-    refresh()
-  }, [open, data, errorText, pending, sessionId, refresh])
+    const t = setTimeout(() => {
+      autoOpenRef.current = true
+      refresh()
+    }, 2000)
+    return () => clearTimeout(t)
+  }, [open, autoSampled, data, errorText, pending, sessionId, refresh])
 
   const dirty = dirtyCount(data)
   const overall = workspaceOverallState(data)
@@ -186,6 +236,7 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
               loading: false,
               refreshing: pending,
               canRefresh: Boolean(sessionId),
+              autoSampled,
               onRefresh: refresh,
               onPrompt: sessionId ? sendPrompt : null,
             }),

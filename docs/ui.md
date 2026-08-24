@@ -116,21 +116,28 @@ separate frontend data pipeline.
 ## Local auto-sampling (no model call)
 
 Since the drawer's data used to appear only after the Agent happened to run
-`git_workspace`, the backend now also samples Git state **locally** and ships
-it to the browser through the DSH session-projection subsystem:
+`git_workspace`, the backend also samples Git state **locally** and ships it
+to the browser through the DSH session-projection subsystem:
 
 - On `session/created` and after every `turn/end`, the plugin runs
   `gitWorkspace()` in the session's `cwd` (plain local git/gh subprocesses —
   no LLM, no conversation message) and appends a log-only
   `tzzs.git-workspace/sample` event carrying the whole `WorkspaceMeta`
-  payload. Identical payloads are deduplicated per session.
+  payload, stamped with an ISO `sampledAt`. Identical payloads are
+  deduplicated per session.
 - A session projection unit registered under the key `tzzs.git-workspace`
   folds those events; the host pushes schema-validated values over the wire
   as `session/projection` frames.
-- The composer chip reads the key via `useProjection('tzzs.git-workspace')`
-  and falls back to scanning tool-result meta for sessions or deployments
-  without the projection registry (headless CLI). Structured error payloads
-  (e.g. `NOT_A_GIT_REPOSITORY`) surface in the drawer empty state.
+- The composer chip reads the key via `useProjection('tzzs.git-workspace')`.
+  Because the payload carries the full `WorkspaceMeta`, the **Pull Request**
+  tab (PR pill, CI checks, review comments) is populated by the same
+  local sample — no agent turn is needed.
+- Client-side merge: the panel combines the projection with tool-result meta
+  from the conversation. The snapshot with the newer `sampledAt` wins
+  conflicts; fields missing from the primary (e.g. a `git_status` result has
+  no `pullRequest`) are gap-filled from the other, so neither source can
+  blank out the other's sections. Usable data always beats error payloads;
+  a projection error surfaces only when nothing else is available.
 
 Because the sample event type is not surface-eligible, it never enters
 model-visible history: auto-loading costs zero tokens and does not pollute
@@ -150,16 +157,32 @@ State is intentionally lightweight:
 
 The composer chip shows a dirty-change count badge plus an overall `StateDot`
 (CI failing → red, running → blue ring, dirty tree → amber, clean → green).
-The drawer's refresh button routes through the sessions service
-(`binding(sessionId).session.prompt(...)`) and asks the agent to run
-`git_workspace` again — there is no client-side tool RPC, so this is the one
-legitimate way to pull fresh data. The empty-state CTA uses the same path.
+With the projection registry present, data refreshes automatically after each
+turn and the panel never prompts the agent on its own. Whether sampling is
+alive is decided by a latch: the first projection payload (value or
+structured error) flips `autoSampled`, and from then on the panel trusts the
+sampler — the PR tab's old "auto-ask the agent when no pull request is
+loaded" behavior stays disabled even when the branch genuinely has no PR.
+
+Prompting the agent (`binding(sessionId).session.prompt(...)` asking for a
+`git_workspace` run) remains only for:
+
+- the explicit refresh button in the drawer header (user-initiated), and
+- sessions where no projection payload ever arrived (headless CLI, or a host
+  without the projection subsystem): opening the drawer with no data
+  auto-prompts once per open, and the PR tab still auto-prompts once per
+  repo/branch when it has no pull request data. Both fallbacks wait out a
+  short 2 s grace first, so a slow first sample never triggers a pointless
+  agent turn.
+
+The empty-state CTA uses the same prompt path.
 
 The local auto-sampler is throttled: before every full sample it takes a cheap
 local fingerprint (`git rev-parse HEAD` + `git status --porcelain`), skips the
-sample entirely when that fingerprint is unchanged within a 30 s window, and
-collapses overlapping samples per session into one in-flight run. Git/gh
-subprocesses carry a hard 20 s timeout so a hung `gh` can never leave a
+sample entirely when that fingerprint is unchanged within a 15 s window (this
+bounds staleness of remote-only changes such as a newly opened PR or CI state
+flips), and collapses overlapping samples per session into one in-flight run.
+Git/gh subprocesses carry a hard 20 s timeout so a hung `gh` can never leave a
 dangling sample.
 
 ## Loading / empty / error states
