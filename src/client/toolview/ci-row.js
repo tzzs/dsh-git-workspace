@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { IconRightUpOutline16, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { Card, Row, Muted, Dot, checkDotState, ciOverallState } from '../components.js'
 import { blockMeta } from '../common.js'
 
@@ -28,9 +29,13 @@ export function CiRow({ block }) {
         ),
         c.url
           ? React.createElement(
-              'a',
-              { href: c.url, target: '_blank', rel: 'noreferrer', 'aria-label': 'Open check run', style: { color: 'var(--dsw-alias-label-caption)', fontSize: '12px', textDecoration: 'none' } },
-              '↗',
+              Tooltip,
+              { label: 'Open check run', side: 'top', delayMs: 250 },
+              React.createElement(
+                'a',
+                { href: c.url, target: '_blank', rel: 'noreferrer', className: 'dgw-linkicon', 'aria-label': 'Open check run' },
+                React.createElement(IconRightUpOutline16, { size: 13 }),
+              ),
             )
           : null,
       ),

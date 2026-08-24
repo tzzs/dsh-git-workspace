@@ -21,6 +21,7 @@ import {
   gitStash,
   gitTags,
   githubPr,
+  githubPrCreate,
   githubPrDiff,
   githubPrReviews,
   githubPrComments,
@@ -39,6 +40,7 @@ import {
   toShowMeta,
   toCompareMeta,
   toPrMeta,
+  toPrCreateMeta,
   toCiMeta,
   toIssueMeta,
 } from './ui/meta.js'
@@ -148,7 +150,7 @@ export function apply(ctx: {
   register(ctx, {
     name: 'git_workspace',
     description:
-      'Summarize the current read-only Git workspace context (branch, changes, commits, PR, CI).',
+      'Summarize the current Git workspace context (branch, changes, commits, PR, CI). Read-only.',
     parameters: {},
     execute: () => gitWorkspace(),
     presentationMeta: (_a, value) =>
@@ -567,6 +569,43 @@ export function apply(ctx: {
             result.content,
           )
         return genericResult('Pull request', result.content)
+      },
+    },
+  })
+
+  // ---- github_pr_create --------------------------------------------------
+  register(ctx, {
+    name: 'github_pr_create',
+    description:
+      'Create a GitHub pull request for a branch using the gh CLI. Fills title/body from commit history unless both are given.',
+    parameters: { title: str, body: str, base: str, head: str, draft: bool },
+    execute: (a) => githubPrCreate(a as never),
+    presentationMeta: (_a, value) => {
+      if (isError(value)) return { error: (value as { error: unknown }).error }
+      const v = value as Parameters<typeof toPrCreateMeta>[0]
+      return toPrCreateMeta(v)
+    },
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; code?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`PR creation failed: ${e.message ?? e.code ?? 'unknown error'}${hint}`)
+      }
+      const v = value as { number?: number; url?: string; title?: string | null; base?: string; head?: string }
+      if (!v.number) return text('Pull request created.')
+      return text(
+        `Created PR #${v.number}: ${v.title ?? ''}\n${v.head ?? ''} → ${v.base ?? ''}${v.url ? `\n${v.url}` : ''}`,
+      )
+    },
+    presenters: {
+      presentCall: () => genericCall('Create pull request'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'PR creation failed') ?? 'Pull request',
+            result.content,
+          )
+        return genericResult('Pull request created', result.content)
       },
     },
   })

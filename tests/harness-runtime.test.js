@@ -21,6 +21,7 @@ const names = [
   'git_stash',
   'git_tags',
   'github_pr',
+  'github_pr_create',
   'github_pr_diff',
   'github_pr_reviews',
   'github_pr_comments',

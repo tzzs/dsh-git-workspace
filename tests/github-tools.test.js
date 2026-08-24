@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { githubPr } from '../lib/github/pr.js'
+import { githubPrCreate } from '../lib/github/pr_create.js'
 import { githubPrDiff } from '../lib/github/pr_diff.js'
 import { githubPrReviews } from '../lib/github/pr_reviews.js'
 import { githubPrComments } from '../lib/github/pr_comments.js'
@@ -37,6 +38,16 @@ async function setupFixture(ghBody) {
   process.env.PATH = `${bin}:${old}`
   return { cwd, restore: () => (process.env.PATH = old) }
 }
+
+const CREATE_DISPATCH = `#!/bin/sh
+if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  echo "https://github.com/owner/repo/pull/7"
+elif [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  printf '%s' '{"number":7,"url":"https://github.com/owner/repo/pull/7","title":"feat: thing","baseRefName":"main","headRefName":"feature/x","isDraft":false}'
+else
+  exit 1
+fi
+`
 
 const DISPATCH = `#!/bin/sh
 if [ "$1" = "pr" ]; then
@@ -242,6 +253,39 @@ test('github_releases lists releases', async () => {
     assert.equal(r.releases.length, 1)
     assert.equal(r.releases[0].tagName, 'v1.0')
     assert.equal(r.releases[0].author, 'alice')
+  } finally {
+    restore()
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+test('github_pr_create creates a PR and returns its metadata', async () => {
+  const { cwd, restore } = await setupFixture(CREATE_DISPATCH)
+  try {
+    await git(cwd, ['checkout', '-qb', 'feature/x'])
+    const r = await githubPrCreate({ base: 'main', title: 'feat: thing', body: 'does things' }, cwd)
+    assert.equal(r.error, undefined)
+    assert.equal(r.number, 7)
+    assert.equal(r.title, 'feat: thing')
+    assert.equal(r.head, 'feature/x')
+    assert.equal(r.base, 'main')
+    assert.equal(r.url, 'https://github.com/owner/repo/pull/7')
+    assert.equal(r.draft, false)
+  } finally {
+    restore()
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+test('github_pr_create rejects bad arguments without calling gh', async () => {
+  const { cwd, restore } = await setupFixture(CREATE_DISPATCH)
+  try {
+    const r = await githubPrCreate({ title: '' }, cwd)
+    assert.equal(r.error.code, 'INVALID_GIT_ARGUMENT')
+    const r2 = await githubPrCreate({ head: '-evil' }, cwd)
+    assert.equal(r2.error.code, 'INVALID_GIT_ARGUMENT')
+    const r3 = await githubPrCreate({ draft: 'yes' }, cwd)
+    assert.equal(r3.error.code, 'INVALID_GIT_ARGUMENT')
   } finally {
     restore()
     await rm(cwd, { recursive: true, force: true })

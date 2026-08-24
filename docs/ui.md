@@ -1,6 +1,6 @@
 # Git Workspace UI
 
-`@tzzs/dsh-git-workspace` ships a browser (client) half that turns the read-only
+`@tzzs/dsh-git-workspace` ships a browser (client) half that turns the
 Git/GitHub backend tools into a compact, persistent Git Workspace inside the
 DeepSeek Harness Web UI.
 
@@ -45,9 +45,12 @@ window.__ModuleLoader__.load({
    visible "Git" chip in the composer card's tool row (beside the access-mode
    control). It renders on the blank new-session screen and in every session.
    The chip shows a dirty-change count badge plus an overall state dot; it
-   toggles a right-side drawer with the live workspace summary. The drawer
-   renders through a React portal into `document.body`, so composer transforms
-   cannot offset it.
+   toggles a right-side Git Workspace sidebar (persisted: it reopens with the
+   session until dismissed). The panel renders through a React portal into
+   `document.body`, so composer transforms cannot offset it. On wide viewports
+   the sidebar docks: it probes the host main column and reserves real layout
+   space by animating its `margin-right`; on narrow viewports (<760px) it falls
+   back to a floating overlay. `Ctrl/Cmd+Shift+G` toggles it from anywhere.
 
    The drawer body has two tabs:
 
@@ -149,7 +152,7 @@ State is intentionally lightweight:
 
 - Each toolview card is a pure function of its frozen `block` (`RunningToolCall`
   or `ToolResultNode`). No store needed.
-- The drawer keeps only `open` + `width` (persisted in localStorage) locally;
+- The sidebar keeps only `open` + `width` (both persisted in localStorage);
   all workspace data is read from the session conversation snapshot via the
   framework's `useSession` hook.
 
@@ -202,12 +205,14 @@ dangling sample.
 - Git status is conveyed by a letter (M/A/D/R/U), not color alone.
 - Interactive elements are real `<button>`/`<a>` with `aria-label`s and titles.
 
-## Read-only principle
+## Read-first, then writes
 
-The UI is **read-only**, mirroring the backend. It inspects, searches, diffs,
-browses, opens, and refreshes — it never stages, commits, pushes, or merges.
-The panel's refresh re-reads the existing session snapshot; it does not invoke
-any mutation.
+Read tools are the foundation: the UI inspects, searches, diffs, browses,
+opens, and refreshes, and the panel's refresh re-reads the existing session
+snapshot without invoking any mutation. Write operations arrive through
+dedicated backend tools (`github_pr_create` today; riskier ones later) and are
+always explicit user actions — a button press or an agent turn the user
+initiated — never fired by automatic sampling or refresh paths.
 
 ## Building the client
 
@@ -221,6 +226,10 @@ classic script DSH serves at `/plugins/@tzzs/dsh-git-workspace/client.js`.
 
 ## Future mutation
 
-The toolview + panel architecture is ready for a mutation phase without
-structural change. The panel is the natural home for stage/commit/push/PR
-controls; they are deliberately omitted from this read-only version.
+The toolview + panel architecture is ready for further write tools — including
+riskier ones such as force-push, reset, and merge (see the roadmap in
+`docs/deepseek-harness-integration.md`) — without structural change. The panel
+is the natural home for their controls. Rules that hold no matter how risky a
+tool is: its description states what it can destroy; it runs only from an
+explicit user action or agent turn (never automatic sampling/refresh); and the
+UI pairs destructive buttons with confirmation before prompting.

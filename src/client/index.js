@@ -19,6 +19,7 @@ const TOOLVIEW = [
   ['git_commits', CommitsRow],
   ['git_show', ShowRow],
   ['github_pr', PrRow],
+  ['github_pr_create', GenericRow],
   ['github_ci', CiRow],
   ['git_files', GenericRow],
   ['git_compare', GenericRow],

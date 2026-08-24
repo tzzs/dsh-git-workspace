@@ -11,6 +11,7 @@ import { gitWorktrees } from '../git/worktrees.js'
 import { gitStash } from '../git/stash.js'
 import { gitTags } from '../git/tags.js'
 import { githubPr } from '../github/pr.js'
+import { githubPrCreate } from '../github/pr_create.js'
 import { githubPrDiff } from '../github/pr_diff.js'
 import { githubPrReviews } from '../github/pr_reviews.js'
 import { githubPrComments } from '../github/pr_comments.js'
@@ -37,6 +38,7 @@ export {
   gitStash,
   gitTags,
   githubPr,
+  githubPrCreate,
   githubPrDiff,
   githubPrReviews,
   githubPrComments,
