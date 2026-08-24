@@ -24,6 +24,7 @@ import {
   Section,
   checkDotState,
 } from '../components.js'
+import { DiffViewer } from './diff-viewer.js'
 
 const REFRESH_HINT = 'Ask the agent to run git_workspace to populate the workspace.'
 
@@ -43,10 +44,10 @@ function StatusChip({ status }) {
     {
       style: {
         fontFamily: 'var(--dsw-font-family-code)',
-        fontSize: '12px',
+        fontSize: '11px',
         fontWeight: 600,
         color: c.color,
-        width: '14px',
+        width: '12px',
         flex: 'none',
         textAlign: 'center',
       },
@@ -78,8 +79,8 @@ function FileStats({ additions, deletions }) {
   return React.createElement(
     'span',
     { style: { display: 'inline-flex', gap: '6px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px' } },
-    React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', minWidth: '24px', textAlign: 'right' } }, `+${fmtNum(additions || 0)}`),
-    React.createElement('span', { style: { color: 'var(--dsw-alias-state-error-primary)', minWidth: '24px', textAlign: 'right' } }, `-${fmtNum(deletions || 0)}`),
+    React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', minWidth: '22px', textAlign: 'right' } }, `+${fmtNum(additions || 0)}`),
+    React.createElement('span', { style: { color: 'var(--dsw-alias-state-error-primary)', minWidth: '22px', textAlign: 'right' } }, `-${fmtNum(deletions || 0)}`),
   )
 }
 
@@ -104,7 +105,7 @@ function treeSize(node) {
   return n
 }
 
-function DirNode({ dir, depth }) {
+function DirNode({ dir, depth, onPrompt }) {
   const [open, setOpen] = React.useState(true)
   return React.createElement(
     React.Fragment,
@@ -130,41 +131,101 @@ function DirNode({ dir, depth }) {
       ),
       React.createElement(
         'span',
-        { style: { fontSize: '13px', color: 'var(--dsw-alias-label-primary)', flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' } },
+        { style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' } },
         dir.name,
       ),
       React.createElement(Muted, null, String(treeSize(dir))),
     ),
-    open ? React.createElement(TreeNodeRows, { node: dir, depth: depth + 1 }) : null,
+    open ? React.createElement(TreeNodeRows, { node: dir, depth: depth + 1, onPrompt }) : null,
   )
 }
 
-function TreeNodeRows({ node, depth }) {
+function TreeNodeRows({ node, depth, onPrompt }) {
   const rows = []
   const dirs = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
   for (const dir of dirs) {
-    rows.push(React.createElement(DirNode, { key: 'd/' + dir.name, dir, depth }))
+    rows.push(React.createElement(DirNode, { key: 'd/' + dir.name, dir, depth, onPrompt }))
   }
   for (const f of files) {
-    rows.push(React.createElement(FileTreeRow, { key: f.path + f.staged, file: f, depth }))
+    rows.push(React.createElement(FileTreeRow, { key: f.path + f.staged, file: f, depth, onPrompt }))
   }
   return rows
 }
 
-function FileTreeRow({ file, depth }) {
+function hasPatch(file) {
+  return (
+    (Array.isArray(file.hunks) && file.hunks.length > 0) ||
+    file.diffOmitted === 'size' ||
+    file.diffOmitted === 'binary'
+  )
+}
+
+function FileTreeRow({ file, depth, onPrompt }) {
+  const [open, setOpen] = React.useState(false)
+  const rowStyle = { padding: `2px 6px 2px ${depth * 12 + 22}px`, gap: '5px' }
+  if (!hasPatch(file)) {
+    return React.createElement(
+      Row,
+      { className: 'dgw-row', style: rowStyle },
+      React.createElement(
+        'span',
+        { style: { display: 'inline-flex', color: 'var(--dsw-alias-label-caption)', flex: 'none' } },
+        React.createElement(IconCodeOutline16, { size: 13 }),
+      ),
+      React.createElement(Code, { style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
+      React.createElement(FileStats, { additions: file.additions, deletions: file.deletions }),
+      React.createElement(StatusChip, { status: file.status }),
+      React.createElement(CopyBtn, { text: file.path, label: 'Copy path' }),
+    )
+  }
+  const toggle = () => setOpen((v) => !v)
   return React.createElement(
-    Row,
-    { className: 'dgw-row', style: { padding: `2px 6px 2px ${depth * 12 + 22}px`, gap: '5px' } },
+    React.Fragment,
+    null,
     React.createElement(
-      'span',
-      { style: { display: 'inline-flex', color: 'var(--dsw-alias-label-caption)', flex: 'none' } },
-      React.createElement(IconCodeOutline16, { size: 13 }),
+      'div',
+      {
+        className: 'dgw-row dgw-filebtn',
+        role: 'button',
+        tabIndex: 0,
+        title: 'Toggle diff',
+        onClick: toggle,
+        onKeyDown: (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            toggle()
+          }
+        },
+        'aria-expanded': open,
+        style: rowStyle,
+      },
+      React.createElement(
+        'span',
+        { className: 'dgw-chevron', 'data-open': String(open) },
+        React.createElement(IconChevronRightOutline14, { size: 12 }),
+      ),
+      React.createElement(
+        'span',
+        { style: { display: 'inline-flex', color: 'var(--dsw-alias-label-caption)', flex: 'none' } },
+        React.createElement(IconCodeOutline16, { size: 13 }),
+      ),
+      React.createElement(Code, { style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
+      React.createElement(FileStats, { additions: file.additions, deletions: file.deletions }),
+      React.createElement(StatusChip, { status: file.status }),
+      React.createElement(
+        'span',
+        { className: 'dgw-copy', onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
+        React.createElement(CopyBtn, { text: file.path, label: 'Copy path' }),
+      ),
     ),
-    React.createElement(Code, { style: { fontSize: '12px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
-    React.createElement(FileStats, { additions: file.additions, deletions: file.deletions }),
-    React.createElement(StatusChip, { status: file.status }),
-    React.createElement(CopyBtn, { text: file.path, label: 'Copy path' }),
+    open
+      ? React.createElement(
+          'div',
+          { style: { margin: `0 -6px 0 ${depth * 12 + 28}px` } },
+          React.createElement(DiffViewer, { file, onClose: () => setOpen(false), onPrompt }),
+        )
+      : null,
   )
 }
 
@@ -184,10 +245,10 @@ function BranchHeader({ data, refreshing, onOpenPr }) {
   const link = (pr && pr.url) || repoWebUrl(data.repository && data.repository.remote)
   return React.createElement(
     'div',
-    { style: { padding: '12px 2px 10px', display: 'flex', flexDirection: 'column', gap: '2px', flex: 'none' } },
+    { style: { padding: '10px 2px 8px', display: 'flex', flexDirection: 'column', gap: '1px', flex: 'none' } },
     React.createElement(
       'div',
-      { style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '20px' } },
+      { style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '16px' } },
       pr
         ? React.createElement(
             'a',
@@ -200,20 +261,20 @@ function BranchHeader({ data, refreshing, onOpenPr }) {
             React.createElement(
               'span',
               { style: { display: 'inline-flex', color: 'var(--dsw-alias-state-success-primary)', flex: 'none' } },
-              React.createElement(IconBranchOutline16, { size: 13 }),
+              React.createElement(IconBranchOutline16, { size: 12 }),
             ),
-            React.createElement('span', { style: { fontSize: '13px', fontWeight: 600 } }, `PR #${pr.number}`),
+            React.createElement('span', { style: { fontSize: '11px', fontWeight: 600 } }, `PR #${pr.number}`),
           )
         : React.createElement(
             'span',
-            { style: { fontSize: '12px', color: 'var(--dsw-alias-label-caption)' } },
+            { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', fontWeight: 500 } },
             (data.repository && data.repository.name) || 'Working tree',
           ),
       React.createElement('span', { style: { flex: '1 1 auto' } }),
       totalA != null && (totalA > 0 || totalD > 0)
         ? React.createElement(
             'span',
-            { style: { display: 'inline-flex', gap: '6px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px' } },
+            { style: { display: 'inline-flex', gap: '6px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px' } },
             React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)' } }, `+${fmtNum(totalA)}`),
             React.createElement('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, `-${fmtNum(totalD)}`),
           )
@@ -221,27 +282,27 @@ function BranchHeader({ data, refreshing, onOpenPr }) {
     ),
     React.createElement(
       'div',
-      { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-      React.createElement(Code, { style: { fontSize: '14px', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, branch.name || 'detached'),
+      { style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '18px' } },
+      React.createElement(Code, { style: { fontSize: '13px', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, branch.name || 'detached'),
     ),
     React.createElement(
       'div',
-      { style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '20px' } },
+      { style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '18px' } },
       React.createElement(
         'span',
-        { style: { fontSize: '12px', color: 'var(--dsw-alias-label-caption)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+        { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
         branch.upstream
           ? `→ ${branch.upstream}`
           : data.comparison && data.comparison.base
-            ? `vs ${data.comparison.base} ↑${data.comparison.ahead} ↓${data.comparison.behind}`
+            ? `→ ${data.comparison.base} ↑${data.comparison.ahead} ↓${data.comparison.behind}`
             : 'no upstream',
       ),
       React.createElement('span', { style: { flex: '1 1 auto' } }),
       branch.ahead > 0
-        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `↑${branch.ahead}`)
+        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `↑${branch.ahead}`)
         : null,
       branch.behind > 0
-        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `↓${branch.behind}`)
+        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `↓${branch.behind}`)
         : null,
       data.stashCount > 0 ? React.createElement(Muted, null, `${data.stashCount} stashed`) : null,
       refreshing
@@ -256,7 +317,7 @@ function BranchHeader({ data, refreshing, onOpenPr }) {
         ? React.createElement(
             'a',
             { href: link, target: '_blank', rel: 'noreferrer', className: 'dgw-linkicon', 'aria-label': 'Open on GitHub', title: 'Open on GitHub' },
-            React.createElement(IconRightUpOutline16, { size: 14 }),
+            React.createElement(IconRightUpOutline16, { size: 13 }),
           )
         : null,
     ),
@@ -279,7 +340,7 @@ function actionPrompt(action, message, data) {
     'commit-push': `Stage all changes, commit${suffix}, then push.`,
     'commit-sync': `Stage all changes, commit${suffix}, then sync with ${upstream}.`,
     push: 'Push the current branch.', 'force-push': 'Force push with force-with-lease.',
-    'create-pr': 'Create a pull request for the current branch.',
+    'create-pr': 'Run the github_pr_create tool for the current branch (it fills title/body from commit history).',
     'push-before-pr': 'Push the current branch before creating its pull request.',
     pull: 'Pull from the configured upstream branch.', 'fast-forward': `Fast-forward from ${upstream}.`,
     sync: `Sync the current branch with ${upstream}.`, rebase: `Rebase from ${upstream}.`,
@@ -303,7 +364,7 @@ function CommitBox({ onPrompt, data }) {
   }
   return React.createElement(
     'div',
-    { style: { padding: '0 2px 12px', display: 'flex', flexDirection: 'column', gap: '8px', flex: 'none' } },
+    { style: { padding: '0 2px 10px', display: 'flex', flexDirection: 'column', gap: '6px', flex: 'none' } },
     React.createElement('textarea', {
       className: 'dgw-textarea',
       placeholder: 'Message',
@@ -328,14 +389,14 @@ function CommitBox({ onPrompt, data }) {
   )
 }
 
-function ChangesBody({ data }) {
+function ChangesBody({ data, onPrompt }) {
   const all = Array.isArray(data.files) ? data.files : []
   if (all.length > 0) {
     const tree = buildTree(all)
     return React.createElement(
       'div',
       { style: { display: 'flex', flexDirection: 'column' } },
-      React.createElement(TreeNodeRows, { node: tree, depth: 0 }),
+      React.createElement(TreeNodeRows, { node: tree, depth: 0, onPrompt }),
       data.filesTruncated
         ? React.createElement(
             'div',
@@ -412,7 +473,7 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream }) {
         'span',
         {
           title: `${c.shortSha} · ${c.author}`,
-          style: { fontSize: '13px', color: 'var(--dsw-alias-label-primary)', flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+          style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
         },
         (c.message || '').split('\n')[0],
       ),
@@ -479,12 +540,12 @@ function CheckRow({ check }) {
     React.createElement(CheckIcon, { check }),
     React.createElement(
       'span',
-      { title: check.name, style: { fontSize: '13px', color: 'var(--dsw-alias-label-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } },
+      { title: check.name, style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } },
       check.name,
     ),
     React.createElement(
       'span',
-      { style: { fontSize: '12px', color: s === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)', flex: 'none' } },
+      { style: { fontSize: '11px', color: s === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)', flex: 'none' } },
       checkLabel(check),
     ),
     check.url
@@ -530,11 +591,11 @@ function ChecksSection({ ci }) {
 function CommentItem({ comment, dimmed }) {
   return React.createElement(
     'div',
-    { style: { padding: '8px 0', borderTop: '1px solid var(--dsw-alias-border-l1)', opacity: dimmed ? 0.6 : 1 } },
+    { style: { padding: '7px 0', borderTop: '1px solid var(--dsw-alias-border-l1)', opacity: dimmed ? 0.6 : 1 } },
     React.createElement(
       'div',
       { style: { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' } },
-      React.createElement('span', { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, comment.author || 'anonymous'),
+      React.createElement('span', { style: { fontSize: '11px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, comment.author || 'anonymous'),
       comment.createdAt ? React.createElement(Muted, null, String(comment.createdAt).slice(0, 10)) : null,
       comment.resolved ? React.createElement(TintPill, { text: 'Resolved', color: 'var(--dsw-alias-label-secondary)' }) : null,
       React.createElement('span', { style: { flex: '1 1 auto' } }),
@@ -558,8 +619,8 @@ function CommentItem({ comment, dimmed }) {
       {
         title: comment.body,
         style: {
-          fontSize: '12px',
-          lineHeight: '17px',
+          fontSize: '11.5px',
+          lineHeight: '16px',
           color: 'var(--dsw-alias-label-secondary)',
           display: '-webkit-box',
           WebkitLineClamp: 3,
@@ -593,16 +654,76 @@ function CommentsSection({ pr, comments }) {
   )
 }
 
-function PrTab({ data, refreshing, canRefresh, onRefresh, onPrompt }) {
+// The UI cannot call tools directly (no client→tool RPC in DSH), so mutations
+// go through one queued agent turn whose text names exactly which tool to run
+// and with which arguments — deterministic forwarding, not free-form chat.
+function createPrPrompt(data) {
+  const branch = data.branch && data.branch.name
+  const base = (data.comparison && data.comparison.base) || 'main'
+  const repo = data.repository && data.repository.name
+  const firstCommit =
+    Array.isArray(data.commits && data.commits.recent) && data.commits.recent.length > 0
+      ? String(data.commits.recent[0].message || '').split('\n')[0].trim()
+      : ''
+  const title = JSON.stringify(firstCommit || `Merge ${branch || 'branch'} into ${base}`)
+  const lines = []
+  if (!data.branch || !data.branch.upstream) {
+    lines.push(
+      `First publish the branch: run \`git push -u origin ${branch || '<branch>'}\`.`,
+    )
+  }
+  let args = `base: ${JSON.stringify(base)}`
+  if (branch) args += `, head: ${JSON.stringify(branch)}`
+  args += `, title: ${title}, body: ${JSON.stringify(
+    (repo ? `Pull request for \`${repo}\`.\n\n` : '') + 'Created from the Git Workspace panel.',
+  )}`
+  lines.push(`Then run the github_pr_create tool with arguments: ${args}.`)
+  lines.push('Afterwards, run the git_workspace tool to refresh the workspace panel.')
+  return lines.join('\n')
+}
+
+function PrTab({ data, refreshing, canRefresh, onRefresh, onPrompt, autoSampled }) {
   const pr = data.pullRequest
   if (!pr) {
+    const upstream = data.branch && data.branch.upstream
+    const target = upstream || (data.comparison && data.comparison.base)
     return React.createElement(
       'div',
-      { style: { padding: '14px 2px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start', flex: 'none' } },
-      React.createElement(Muted, null, refreshing ? 'Loading pull request…' : 'No pull request for this branch.'),
-      !refreshing && canRefresh !== false && onRefresh
-        ? React.createElement(Button, { variant: 'outline', size: 'sm', onClick: onRefresh }, 'Run git_workspace')
+      { style: { padding: '12px 2px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start', flex: 'none' } },
+      onPrompt
+        ? React.createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'dgw-createpr',
+              title: 'Ask the agent to open a pull request for this branch',
+              onClick: () => onPrompt(createPrPrompt(data)),
+            },
+            React.createElement(IconBranchOutline16, { size: 14 }),
+            'Create PR',
+          )
         : null,
+      React.createElement(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 } },
+        React.createElement(
+          'span',
+          { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } },
+          (data.repository && data.repository.name) || 'Working tree',
+        ),
+        React.createElement(
+          'span',
+          { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+          target ? `→ ${target}` : 'no upstream',
+        ),
+      ),
+      refreshing
+        ? React.createElement(Muted, null, 'Loading pull request…')
+        : autoSampled
+          ? null
+          : canRefresh !== false && onRefresh
+            ? React.createElement(Button, { variant: 'outline', size: 'sm', onClick: onRefresh }, 'Run git_workspace')
+            : null,
     )
   }
   const state = (pr.state || 'open').toUpperCase()
@@ -622,32 +743,32 @@ function PrTab({ data, refreshing, canRefresh, onRefresh, onPrompt }) {
     null,
     React.createElement(
       'div',
-      { style: { padding: '12px 2px 10px', display: 'flex', flexDirection: 'column', gap: '6px', flex: 'none' } },
+      { style: { padding: '10px 2px 8px', display: 'flex', flexDirection: 'column', gap: '5px', flex: 'none' } },
       React.createElement(
         'div',
         { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
         React.createElement(
           'span',
           { style: { display: 'inline-flex', color: 'var(--dsw-alias-state-success-primary)', flex: 'none' } },
-          React.createElement(IconBranchOutline16, { size: 14 }),
+          React.createElement(IconBranchOutline16, { size: 13 }),
         ),
-        React.createElement('span', { style: { fontSize: '14px', fontWeight: 700 } }, `#${pr.number}`),
+        React.createElement('span', { style: { fontSize: '13px', fontWeight: 700 } }, `#${pr.number}`),
         React.createElement(TintPill, { text: stateText, color: stateColor }),
         React.createElement('span', { style: { flex: '1 1 auto' } }),
         React.createElement(
           'a',
           { href: pr.url, target: '_blank', rel: 'noreferrer', className: 'dgw-linkicon', 'aria-label': 'Open on GitHub', title: 'Open on GitHub' },
-          React.createElement(IconRightUpOutline16, { size: 14 }),
+          React.createElement(IconRightUpOutline16, { size: 13 }),
         ),
       ),
       React.createElement(
         'div',
-        { style: { fontSize: '14px', lineHeight: '20px', color: 'var(--dsw-alias-label-primary)' } },
+        { style: { fontSize: '13px', lineHeight: '18px', color: 'var(--dsw-alias-label-primary)' } },
         pr.title,
       ),
       React.createElement(
         'div',
-        { style: { display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '3px', fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px' } },
+        { style: { display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '2px', fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px' } },
         React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)' } }, `+${fmtNum(additions)}`),
         React.createElement('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, `-${fmtNum(deletions)}`),
         upstream ? React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, `remote ${upstream}`) : null,
@@ -656,7 +777,7 @@ function PrTab({ data, refreshing, canRefresh, onRefresh, onPrompt }) {
       pr.updatedAt
         ? React.createElement(
             'div',
-            { style: { fontSize: '12px', color: 'var(--dsw-alias-label-caption)' } },
+            { style: { fontSize: '11px', color: 'var(--dsw-alias-label-caption)' } },
             `PR updated ${fmtTime(pr.updatedAt)}`,
           )
         : null,
@@ -664,7 +785,7 @@ function PrTab({ data, refreshing, canRefresh, onRefresh, onPrompt }) {
     state === 'OPEN' && onPrompt
       ? React.createElement(
           'div',
-          { style: { padding: '0 2px 12px', flex: 'none' } },
+          { style: { padding: '0 2px 10px', flex: 'none' } },
           React.createElement(
             'button',
             {
@@ -698,7 +819,7 @@ function ScTab({ data, refreshing, onPrompt, onOpenPr }) {
     React.createElement(
       Section,
       { title: 'Changes', count: dirty || null, defaultOpen: true },
-      React.createElement(ChangesBody, { data }),
+      React.createElement(ChangesBody, { data, onPrompt }),
     ),
     React.createElement(
       Section,
@@ -764,21 +885,26 @@ function TabBar({ tab, setTab, prHint }) {
   )
 }
 
-export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRefresh, onRefresh, onPrompt }) {
+export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRefresh, autoSampled, onRefresh, onPrompt }) {
   const [tab, setTab] = React.useState('sc')
 
-  // Auto-refresh once per branch when the PR tab has no pullRequest data yet.
+  // Fallback-only: when no projection payload exists at all, the PR tab asks
+  // the agent once per repo/branch after a short grace. Once local sampling
+  // is proven alive (autoSampled), pullRequest/ci arrive on their own.
   const prAutoRef = React.useRef(null)
   React.useEffect(() => {
-    if (tab !== 'pr' || !data || data.pullRequest) return
+    if (autoSampled || tab !== 'pr' || !data || data.pullRequest) return
     if (canRefresh === false || !onRefresh) return
     const repo = (data.repository && data.repository.name) || ''
     const branch = (data.branch && data.branch.name) || ''
     const key = `${repo}:${branch}`
     if (prAutoRef.current === key) return
-    prAutoRef.current = key
-    if (!refreshing) onRefresh()
-  }, [tab, data, refreshing, canRefresh, onRefresh])
+    const t = setTimeout(() => {
+      prAutoRef.current = key
+      if (!refreshing) onRefresh()
+    }, 2000)
+    return () => clearTimeout(t)
+  }, [autoSampled, tab, data, refreshing, canRefresh, onRefresh])
 
   let body
   if (loading) {
@@ -807,7 +933,7 @@ export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRef
       React.Fragment,
       null,
       React.createElement(TabBar, { tab, setTab, prHint: data.pullRequest ? (prUnresolved || null) : null }),
-      tab === 'pr' ? PrTab({ data, refreshing, canRefresh, onRefresh, onPrompt }) : ScTab({ data, refreshing, onPrompt, onOpenPr: () => setTab('pr') }),
+      tab === 'pr' ? PrTab({ data, refreshing, canRefresh, onRefresh, onPrompt, autoSampled }) : ScTab({ data, refreshing, onPrompt, onOpenPr: () => setTab('pr') }),
     )
   }
 

@@ -8,7 +8,167 @@ import { gitBranches } from '../git/branches.js'
 import { gitStash } from '../git/stash.js'
 import { githubPrComments } from '../github/pr_comments.js'
 import { command } from '../git/exec.js'
-import type { Result, CommitSummary, GitFile } from '../types.js'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import type { Result, CommitSummary, GitFile, Hunk, DiffFile } from '../types.js'
+
+export type WorkspaceFile = GitFile & {
+  additions?: number
+  deletions?: number
+  hunks?: Hunk[]
+  diffOmitted?: 'size' | 'binary'
+}
+
+const MAX_INLINE_DIFF_BYTES = 64 * 1024
+const MAX_INLINE_HUNKS_PER_FILE = 30
+const MAX_INLINE_LINES = 200
+const MAX_UNTRACKED_PREVIEW_LINES = 200
+
+function parseHunks(patch: string): Hunk[] {
+  const lines = patch.split('\n')
+  const hunks: Hunk[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/)
+    if (!m) continue
+    const h: Hunk = {
+      oldStart: +m[1],
+      oldLines: +(m[2] ?? 1),
+      newStart: +m[3],
+      newLines: +(m[4] ?? 1),
+      lines: [],
+    }
+    for (i++; i < lines.length && !lines[i].startsWith('@@ '); i++) {
+      const l = lines[i]
+      if (l[0] === ' ' || l[0] === '+' || l[0] === '-') h.lines.push(l)
+    }
+    hunks.push(h)
+    i--
+  }
+  return hunks
+}
+
+function isBinaryPatch(chunk: string): boolean {
+  return /^Binary files /m.test(chunk) || /^GIT binary patch/m.test(chunk)
+}
+
+async function collectDiffs(root: string): Promise<Map<string, DiffFile>> {
+  const out = new Map<string, DiffFile>()
+  try {
+    const [unstaged, staged] = await Promise.all([
+      command('git', ['-c', 'core.quotePath=false', 'diff', '--no-color', '--unified=3'], root).catch(() => null),
+      command('git', ['-c', 'core.quotePath=false', 'diff', '--cached', '--no-color', '--unified=3'], root).catch(() => null),
+    ])
+    for (const run of [unstaged, staged]) {
+      if (!run) continue
+      for (const chunk of run.stdout.split(/^diff --git /m)) {
+        if (!chunk) continue
+        const header = chunk.split('\n')[0] || ''
+        const ms = header.match(/a\/(.*?) b\/(.*)$/)
+        if (!ms) continue
+        const path = ms[2]
+        const renamed = chunk.match(/^rename from (.+)$/m)
+        const copied = chunk.match(/^copy from (.+)$/m)
+        const newFile = /^new file mode/m.test(chunk)
+        const deletedFile = /^deleted file mode/m.test(chunk)
+        const binary = isBinaryPatch(chunk)
+        let status = 'modified'
+        let oldPath: string | null = ms[1]
+        if (renamed) {
+          status = 'renamed'
+          oldPath = renamed[1].trim()
+        } else if (copied) {
+          status = 'copied'
+          oldPath = copied[1].trim()
+        } else if (newFile) {
+          status = 'added'
+          oldPath = null
+        } else if (deletedFile) {
+          status = 'deleted'
+        }
+        const additions = (chunk.match(/^\+(?!\+\+)/gm) || []).length
+        const deletions = (chunk.match(/^-(?!--)/gm) || []).length
+        const existing = out.get(path)
+        const hunks = binary ? [] : parseHunks(chunk)
+        if (existing) {
+          existing.hunks.push(...hunks)
+          existing.additions += additions
+          existing.deletions += deletions
+          if (!existing.oldPath && oldPath) existing.oldPath = oldPath
+        } else {
+          out.set(path, { path, oldPath, status, binary, additions, deletions, hunks })
+        }
+      }
+    }
+  } catch {
+    return out
+  }
+  return out
+}
+
+async function synthesizeUntracked(root: string, paths: string[]): Promise<DiffFile[]> {
+  const files: DiffFile[] = []
+  for (const path of paths.slice(0, 20)) {
+    try {
+      const text = await readFile(join(root, ...path.split('/')), 'utf8')
+      const lines = text.split('\n')
+      if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+      if (lines.some((l) => l.includes('\0'))) continue
+      const preview = lines.slice(0, MAX_UNTRACKED_PREVIEW_LINES)
+      files.push({
+        path,
+        oldPath: null,
+        status: 'added',
+        binary: false,
+        additions: lines.length,
+        deletions: 0,
+        hunks: [
+          {
+            oldStart: 0,
+            oldLines: 0,
+            newStart: 1,
+            newLines: preview.length,
+            lines: preview.map((l) => '+' + l),
+          },
+        ],
+      })
+    } catch {
+      /* unreadable or too large — skip */
+    }
+  }
+  return files
+}
+
+function budgetDiffs(files: Iterable<DiffFile>): WorkspaceFile[] {
+  const out: WorkspaceFile[] = []
+  let bytes = 0
+  for (const f of files) {
+    const base: WorkspaceFile = {
+      path: f.path,
+      oldPath: f.oldPath ?? null,
+      status: f.status as GitFile['status'],
+      staged: false,
+      additions: f.additions,
+      deletions: f.deletions,
+    }
+    if (f.binary) {
+      base.diffOmitted = 'binary'
+      out.push(base)
+      continue
+    }
+    const hunks = (f.hunks ?? []).slice(0, MAX_INLINE_HUNKS_PER_FILE).map((h) => ({
+      oldStart: h.oldStart,
+      oldLines: h.oldLines,
+      newStart: h.newStart,
+      newLines: h.newLines,
+      lines: h.lines.slice(0, MAX_INLINE_LINES),
+    }))
+    const size = hunks.reduce((n, h) => n + h.lines.join('').length + 40, 100)
+    if (bytes + size > MAX_INLINE_DIFF_BYTES) continue
+    bytes += size
+    out.push({ ...base, hunks })
+  }
+  return out
+}
 
 export interface WorkspaceComment {
   id: string
@@ -58,7 +218,8 @@ export interface WorkspaceResult {
     ahead: number
     recent: CommitSummary[]
   }
-  files: Array<GitFile & { additions?: number; deletions?: number }>
+  files: WorkspaceFile[]
+  diffs?: WorkspaceFile[]
   filesTruncated: boolean
   branches: Array<{ name: string; current: boolean; upstream: string | null; ahead: number; behind: number }>
   stashCount: number
@@ -153,11 +314,23 @@ export async function gitWorkspace(
         }
       : null
 
-  const numstat = await fileNumstats(r.root)
-  const files: Array<GitFile & { additions?: number; deletions?: number }> = s.files.slice(0, 200).map((f) => {
+  const [numstat, trackedDiffs] = await Promise.all([fileNumstats(r.root), collectDiffs(r.root)])
+  const untrackedPaths = s.files
+    .filter((f) => f.status === 'untracked' && !trackedDiffs.has(f.path))
+    .map((f) => f.path)
+  const synthesized = await synthesizeUntracked(r.root, untrackedPaths)
+  for (const u of synthesized) trackedDiffs.set(u.path, u)
+  const inline = budgetDiffs(trackedDiffs.values())
+  const inlineByPath = new Map(inline.map((f) => [f.path, f]))
+  const files: WorkspaceFile[] = s.files.slice(0, 200).map((f) => {
     const st = f.staged ? (numstat.staged.get(f.path) ?? numstat.unstaged.get(f.path)) : numstat.unstaged.get(f.path)
-    if (!st) return f
-    return { ...f, additions: st.additions, deletions: st.deletions }
+    const base: WorkspaceFile = st ? { ...f, additions: st.additions, deletions: st.deletions } : { ...f }
+    const d =
+      inlineByPath.get(f.path) ??
+      (f.oldPath && inlineByPath.has(f.oldPath) ? inlineByPath.get(f.oldPath) : undefined)
+    if (!d || base.hunks || base.diffOmitted) return base
+    if (d.hunks || d.diffOmitted) return { ...base, hunks: d.hunks, diffOmitted: d.diffOmitted }
+    return base
   })
   const additionsTotal = files.reduce((n, f) => n + (f.additions ?? 0), 0)
   const deletionsTotal = files.reduce((n, f) => n + (f.deletions ?? 0), 0)
@@ -209,6 +382,7 @@ export async function gitWorkspace(
       recent: !('error' in commits) ? commits.commits : [],
     },
     files,
+    ...(inline.length ? { diffs: inline } : {}),
     filesTruncated: s.files.length > 200,
     branches:
       !('error' in branches)
