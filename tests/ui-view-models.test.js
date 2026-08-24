@@ -189,6 +189,7 @@ test('toWorkspaceMeta carries files, commits, branches, stash and comparison', (
   assert.deepEqual(m.branches, [{ name: 'b', current: true, upstream: null, ahead: 0, behind: 0 }])
   assert.equal(m.stashCount, 1)
   assert.deepEqual(m.comparison, { base: 'main', ahead: 2, behind: 0 })
+  assert.ok(typeof m.sampledAt === 'string' && !Number.isNaN(Date.parse(m.sampledAt)), 'stamps an ISO sampledAt')
 })
 
 test('toWorkspaceMeta omits optional sections when absent', () => {

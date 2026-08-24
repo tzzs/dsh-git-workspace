@@ -19,6 +19,7 @@ export interface WorkspaceCommentMeta {
 }
 
 export interface WorkspaceMeta {
+  sampledAt?: string
   repository: { name: string; root: string; remote: string | null }
   branch: { name: string | null; upstream: string | null; ahead: number; behind: number }
   changes: { modified: number; staged: number; deleted: number; renamed: number; untracked: number }
@@ -201,6 +202,7 @@ export function toWorkspaceMeta(w: {
   ci: { status: string; checks: CheckRun[] } | null
 }): WorkspaceMeta {
   return {
+    sampledAt: new Date().toISOString(),
     repository: w.repository,
     branch: w.branch,
     changes: {

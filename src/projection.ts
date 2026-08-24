@@ -36,6 +36,7 @@ const unit: ProjectionUnit = {
   key: WORKSPACE_PROJECTION_KEY,
   schema: {
     parse(value) {
+      if (value === null || value === undefined) return null
       if (!isWorkspaceSample(value)) throw new Error('invalid git workspace projection value')
       return value
     },
@@ -49,7 +50,7 @@ const unit: ProjectionUnit = {
 
 type SamplerHost = Pick<Context, 'inject'>
 
-const REMOTE_TTL_MS = 30_000
+const REMOTE_TTL_MS = 15_000
 
 const lastFingerprints = new WeakMap<Session, string>()
 const lastSamples = new WeakMap<Session, { local: string; at: number }>()
