@@ -1,6 +1,11 @@
 import * as React from 'react'
 import * as ReactDOM from 'react-dom'
-import { IconBranchOutline16, IconRefreshOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconBranchOutline16,
+  IconRefreshOutline14,
+  Pill,
+  Tooltip,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import { GitWorkspacePanel } from './workspace-panel.js'
 import { Drawer } from './drawer.js'
 import { sessionPrompt } from '../services.js'
@@ -15,6 +20,20 @@ const REFRESH_PROMPT =
   'Run the git_workspace tool now and report the refreshed workspace summary.'
 
 const PROJECTION_KEY = 'tzzs.git-workspace'
+const OPEN_KEY = 'dsh-git-workspace.open'
+
+function readOpenPref() {
+  try {
+    return localStorage.getItem(OPEN_KEY) === '1'
+  } catch {}
+  return false
+}
+
+function writeOpenPref(open) {
+  try {
+    localStorage.setItem(OPEN_KEY, open ? '1' : '0')
+  } catch {}
+}
 
 function sampleTime(meta) {
   const t = meta && typeof meta.sampledAt === 'string' ? Date.parse(meta.sampledAt) : NaN
@@ -109,7 +128,7 @@ function extractProjected(value) {
 }
 
 export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
-  const [open, setOpen] = React.useState(false)
+  const [open, setOpen] = React.useState(readOpenPref)
   const [pending, setPending] = React.useState(false)
 
   ensureStyles()
@@ -135,6 +154,22 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
 
   const toggle = React.useCallback(() => setOpen((v) => !v), [])
   const close = React.useCallback(() => setOpen(false), [])
+
+  // Sidebar persistence + global toggle shortcut (Ctrl/Cmd+Shift+G).
+  React.useEffect(() => {
+    writeOpenPref(open)
+  }, [open])
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && String(e.key).toLowerCase() === 'g') {
+        e.preventDefault()
+        setOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const refresh = React.useCallback(() => {
     if (pending || !sessionId) return Promise.resolve(false)
@@ -169,40 +204,42 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
   const overall = workspaceOverallState(data)
 
   const button = React.createElement(
-    'button',
-    {
-      type: 'button',
-      className: 'dgw-chip',
-      'data-active': open ? 'true' : undefined,
-      onClick: toggle,
-      title: 'Git Workspace',
-      'aria-label': 'Git Workspace',
-      'aria-haspopup': 'dialog',
-      'aria-expanded': open,
-    },
-    React.createElement(IconBranchOutline16, { size: 14 }),
-    React.createElement('span', null, 'Git'),
-    dirty > 0
-      ? React.createElement(
-          'span',
-          {
-            style: {
-              minWidth: '16px',
-              height: '16px',
-              padding: '0 4px',
-              borderRadius: '999px',
-              background: 'var(--dsw-alias-state-warn-primary)',
-              color: 'var(--dsw-alias-bg-base)',
-              fontSize: '10px',
-              fontWeight: 600,
-              lineHeight: '16px',
-              textAlign: 'center',
+    Tooltip,
+    { label: 'Git Workspace (Ctrl/Cmd+Shift+G)', side: 'bottom', delayMs: 250 },
+    React.createElement(
+      Pill,
+      {
+        active: open,
+        onClick: toggle,
+        style: { height: '28px', borderRadius: '14px', fontSize: '13px' },
+        'aria-label': 'Git Workspace',
+        'aria-haspopup': 'dialog',
+        'aria-expanded': open,
+      },
+      React.createElement(IconBranchOutline16, { size: 14 }),
+      React.createElement('span', null, 'Git'),
+      dirty > 0
+        ? React.createElement(
+            'span',
+            {
+              style: {
+                minWidth: '16px',
+                height: '16px',
+                padding: '0 4px',
+                borderRadius: '999px',
+                background: 'var(--dsw-alias-state-warn-primary)',
+                color: 'var(--dsw-alias-bg-base)',
+                fontSize: '10px',
+                fontWeight: 600,
+                lineHeight: '16px',
+                textAlign: 'center',
+              },
             },
-          },
-          dirty > 99 ? '99+' : String(dirty),
-        )
-      : null,
-    overall ? React.createElement(Dot, { state: overall, size: 8 }) : null,
+            dirty > 99 ? '99+' : String(dirty),
+          )
+        : null,
+      overall ? React.createElement(Dot, { state: overall, size: 8 }) : null,
+    ),
   )
 
   const subtitle = data

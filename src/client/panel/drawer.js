@@ -4,7 +4,36 @@ import { IconBtn } from '../components.js'
 
 const WIDTH_KEY = 'dsh-git-workspace.width'
 const MIN_W = 320
-const MAX_W = 760
+const MAX_W = 600
+const DOCK_MIN_VIEWPORT = 760
+const DOCK_HOST_SELECTORS = [
+  '[data-dsh-conversation]',
+  '[data-testid=\"conversation\"]',
+  'main',
+  '[role=\"main\"]',
+]
+
+// Best-effort probe for the host app's main column so the open sidebar can
+// reserve real layout space instead of floating over content. Any miss (no
+// matching node, narrow viewport, tiny column) degrades to overlay mode.
+function findDockHost(doc) {
+  if (typeof doc.querySelector !== 'function') return null
+  for (const sel of DOCK_HOST_SELECTORS) {
+    let el = null
+    try {
+      el = doc.querySelector(sel)
+    } catch {}
+    if (
+      el &&
+      el.style &&
+      typeof el.getBoundingClientRect === 'function' &&
+      el.getBoundingClientRect().width >= 520
+    ) {
+      return el
+    }
+  }
+  return null
+}
 
 function clampWidth(w) {
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1024
@@ -16,7 +45,7 @@ function initialWidth() {
     const saved = Number(localStorage.getItem(WIDTH_KEY))
     if (Number.isFinite(saved) && saved > 0) return clampWidth(saved)
   } catch {}
-  return 400
+  return 380
 }
 
 export function Drawer({ open, onClose, title, subtitle, actions, children }) {
@@ -34,7 +63,33 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
+  // While docked (wide viewport + host column found), reserve real layout
+  // space; width streams through dockRef so drags do not re-probe the DOM.
+  const dockRef = React.useRef(null)
+  React.useEffect(() => {
+    if (!open || typeof document === 'undefined' || typeof window === 'undefined') return undefined
+    if (window.innerWidth < DOCK_MIN_VIEWPORT) return undefined
+    const host = findDockHost(document)
+    if (!host) return undefined
+    dockRef.current = host
+    const prevMargin = host.style.marginRight || ''
+    host.style.transition = 'margin-right 160ms ease'
+    if (document.body && document.body.classList) document.body.classList.add('dgw-dock-open')
+    return () => {
+      host.style.transition = ''
+      host.style.marginRight = prevMargin
+      if (document.body && document.body.classList) document.body.classList.remove('dgw-dock-open')
+      dockRef.current = null
+    }
+  }, [open])
+  React.useEffect(() => {
+    const host = dockRef.current
+    if (host) host.style.marginRight = `${width}px`
+  }, [width])
+
   if (!open) return null
+
+  const overlay = typeof window !== 'undefined' && window.innerWidth < DOCK_MIN_VIEWPORT
 
   const startDrag = (e) => {
     e.preventDefault()
@@ -76,7 +131,8 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
         maxWidth: '92vw',
         background: 'var(--dsw-alias-bg-layer-2)',
         borderLeft: '1px solid var(--dsw-alias-border-l2)',
-        zIndex: 1000,
+        zIndex: overlay ? 1000 : 900,
+        boxShadow: overlay ? '0 0 32px rgba(0, 0, 0, 0.28)' : 'none',
         display: 'flex',
         flexDirection: 'column',
         fontFamily: 'var(--dsw-font-family)',
