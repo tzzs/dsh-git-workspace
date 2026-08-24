@@ -714,27 +714,6 @@ function ScTab({ data, refreshing, onPrompt, onOpenPr }) {
           React.createElement(CommitGraph, { commits: data.commits, branch: data.branch }),
         )
       : null,
-    data.branches && data.branches.length > 1
-      ? React.createElement(
-          Section,
-          { title: 'Branches', count: data.branches.length, defaultOpen: false },
-          data.branches.slice(0, 12).map((b) =>
-            React.createElement(
-              Row,
-              { key: b.name, className: 'dgw-row' },
-              b.current ? React.createElement(Dot, { state: 'done', size: 6 }) : React.createElement('span', { style: { width: '6px', flex: 'none' } }),
-              React.createElement(Code, null, b.name),
-              b.ahead > 0 ? React.createElement(Stat, { text: `↑${b.ahead}`, color: 'var(--dsw-alias-state-success-primary)' }) : null,
-              b.behind > 0 ? React.createElement(Stat, { text: `↓${b.behind}`, color: 'var(--dsw-alias-state-error-primary)' }) : null,
-              React.createElement('span', { style: { flex: '1 1 auto' } }),
-              React.createElement(CopyBtn, { text: b.name, label: 'Copy branch name' }),
-            ),
-          ),
-          data.branches.length > 12
-            ? React.createElement('div', { key: 'more', style: { padding: '2px 6px' } }, React.createElement(Muted, null, `+${data.branches.length - 12} more`))
-            : null,
-        )
-      : null,
   )
 }
 
