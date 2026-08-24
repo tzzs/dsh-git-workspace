@@ -74,6 +74,7 @@ export const STYLE_SHEET = [
   '.dgw-iconbtn:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}',
   '.dgw-chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border:none;background:none;border-radius:6px;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:var(--dsw-font-family);font-size:13px;line-height:28px;white-space:nowrap;flex:none;transition:background .12s ease,color .12s ease}',
   '.dgw-chip:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}',
+  '.dgw-chip[data-active="true"]{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}',
   '.dgw-row{position:relative;border-radius:6px;margin:0 -6px;padding:2px 6px;transition:background .1s ease}',
   '.dgw-row:hover{background:var(--dsw-alias-interactive-bg-hover)}',
   '.dgw-copy{opacity:0;transition:opacity .12s ease}',

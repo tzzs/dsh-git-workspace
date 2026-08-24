@@ -123,6 +123,7 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
     {
       type: 'button',
       className: 'dgw-chip',
+      'data-active': open ? 'true' : undefined,
       onClick: toggle,
       title: 'Git Workspace',
       'aria-label': 'Git Workspace',
