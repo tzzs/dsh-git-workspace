@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session } from '@deepseek-ai/dsh-session'
+import { command } from './git/exec.js'
 import { gitWorkspace } from './tools/git-workspace.js'
 import { toWorkspaceMeta } from './ui/meta.js'
 import type { WorkspaceMeta } from './ui/meta.js'
@@ -48,13 +49,33 @@ const unit: ProjectionUnit = {
 
 type SamplerHost = Pick<Context, 'inject'>
 
+const REMOTE_TTL_MS = 30_000
+
 const lastFingerprints = new WeakMap<Session, string>()
+const lastSamples = new WeakMap<Session, { local: string; at: number }>()
+const inFlight = new WeakMap<Session, Promise<void>>()
 const attached = new WeakSet<Context>()
 
-async function sampleSession(session: Session): Promise<void> {
+async function localFingerprint(cwd: string): Promise<string | null> {
+  try {
+    const [head, status] = await Promise.all([
+      command('git', ['rev-parse', 'HEAD'], cwd),
+      command('git', ['-c', 'core.quotePath=false', 'status', '--porcelain'], cwd),
+    ])
+    return head.stdout.trim() + '\n' + status.stdout
+  } catch {
+    return null
+  }
+}
+
+async function runSample(session: Session): Promise<void> {
   try {
     const cwd = session.header?.cwd
     if (!cwd || session.header?.origin === 'subagent') return
+    const local = await localFingerprint(cwd)
+    const key = local ?? ''
+    const prev = lastSamples.get(session)
+    if (prev && prev.local === key && Date.now() - prev.at < REMOTE_TTL_MS) return
     const result = await gitWorkspace(cwd)
     const payload: WorkspaceSample =
       'error' in result
@@ -68,6 +89,7 @@ async function sampleSession(session: Session): Promise<void> {
                 }
               : null,
           })
+    lastSamples.set(session, { local: key, at: Date.now() })
     const fingerprint = JSON.stringify(payload)
     if (lastFingerprints.get(session) === fingerprint) return
     lastFingerprints.set(session, fingerprint)
@@ -75,6 +97,16 @@ async function sampleSession(session: Session): Promise<void> {
   } catch {
     return
   }
+}
+
+function sampleSession(session: Session): Promise<void> {
+  const running = inFlight.get(session)
+  if (running) return running
+  const task = runSample(session).finally(() => {
+    if (inFlight.get(session) === task) inFlight.delete(session)
+  })
+  inFlight.set(session, task)
+  return task
 }
 
 export function installWorkspaceSampler(ctx: SamplerHost): void {

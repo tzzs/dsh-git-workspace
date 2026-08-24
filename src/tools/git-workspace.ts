@@ -70,6 +70,7 @@ export interface WorkspaceResult {
     state: string
     draft: boolean
     url: string
+    updatedAt?: string | null
     comments?: WorkspaceComment[]
   } | null
   ci?: {
@@ -98,8 +99,8 @@ function parseNumstat(stdout: string) {
 
 async function fileNumstats(root: string) {
   const [unstagedOut, stagedOut] = await Promise.all([
-    command('git', ['diff', '--numstat'], root).catch(() => null),
-    command('git', ['diff', '--cached', '--numstat'], root).catch(() => null),
+    command('git', ['-c', 'core.quotePath=false', 'diff', '--no-renames', '--numstat'], root).catch(() => null),
+    command('git', ['-c', 'core.quotePath=false', 'diff', '--cached', '--no-renames', '--numstat'], root).catch(() => null),
   ])
   return {
     unstaged: unstagedOut ? parseNumstat(unstagedOut.stdout) : new Map(),
@@ -109,7 +110,8 @@ async function fileNumstats(root: string) {
 
 export async function gitWorkspace(
   cwd = process.cwd(),
-): Promise<Result<WorkspaceResult>> {  const r = await repository(cwd)
+): Promise<Result<WorkspaceResult>> {
+  const r = await repository(cwd)
   if ('error' in r) return r
 
   const [s, commits, pr, ci, branches, stash] = await Promise.all([
@@ -147,6 +149,7 @@ export async function gitWorkspace(
           state: pr.pullRequests[0].state,
           draft: pr.pullRequests[0].draft,
           url: pr.pullRequests[0].url,
+          updatedAt: pr.pullRequests[0].updatedAt ?? null,
         }
       : null
 
