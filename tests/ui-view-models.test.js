@@ -16,7 +16,7 @@ import {
   truncatePath,
   checkIcon,
 } from '../lib/ui/view-models.js'
-import { toWorkspaceMeta } from '../lib/ui/meta.js'
+import { toWorkspaceMeta, toDiffMeta } from '../lib/ui/meta.js'
 
 test('toGitFileVm maps status to label and staged/unstaged', () => {
   const m = toGitFileVm({ path: 'a.ts', status: 'modified', staged: true })
@@ -205,4 +205,49 @@ test('toWorkspaceMeta omits optional sections when absent', () => {
   assert.equal(m.branches, undefined)
   assert.equal(m.stashCount, undefined)
   assert.equal(m.comparison, undefined)
+})
+
+test('toWorkspaceMeta merges sampled diff hunks into matching files by path', () => {
+  const m = toWorkspaceMeta({
+    repository: { name: 'r', root: '/r', remote: null },
+    branch: { name: 'b', upstream: null, ahead: 0, behind: 0 },
+    workspace: { clean: false, modified: 2, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+    files: [
+      { path: 'a.ts', oldPath: null, status: 'modified', staged: false, additions: 1, deletions: 1 },
+      { path: 'plain.ts', oldPath: null, status: 'untracked', staged: false },
+    ],
+    diffs: [
+      {
+        path: 'a.ts',
+        oldPath: null,
+        status: 'modified',
+        staged: false,
+        additions: 1,
+        deletions: 1,
+        hunks: [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: ['-x', '+y'] }],
+      },
+    ],
+    pullRequest: null,
+    ci: null,
+  })
+  const a = m.files.find((f) => f.path === 'a.ts')
+  const plain = m.files.find((f) => f.path === 'plain.ts')
+  assert.equal(a.hunks.length, 1)
+  assert.deepEqual(a.hunks[0].lines, ['-x', '+y'])
+  assert.equal(a.staged, false, 'merge preserves the status-list metadata')
+  assert.equal(plain.hunks, undefined, 'files without sampled hunks stay untouched')
+})
+
+test('toDiffMeta carries bounded hunks and marks binary omission', () => {
+  const d = toDiffMeta({
+    files: [
+      { path: 'a.ts', oldPath: null, status: 'modified', additions: 1, deletions: 1, hunks: [{ oldStart: 3, oldLines: 2, newStart: 3, newLines: 2, lines: ['-a', '+b'] }] },
+      { path: 'img.png', oldPath: null, status: 'added', binary: true, additions: 0, deletions: 0, hunks: [] },
+    ],
+  })
+  const a = d.files.find((f) => f.path === 'a.ts')
+  const img = d.files.find((f) => f.path === 'img.png')
+  assert.deepEqual(a.hunks[0].lines, ['-a', '+b'])
+  assert.equal(img.binary, true)
+  assert.equal(img.diffOmitted, 'binary')
 })
