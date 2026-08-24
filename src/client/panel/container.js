@@ -43,9 +43,12 @@ function extractWorkspaceData(meta) {
     files: meta.files || null,
     filesTruncated: meta.filesTruncated === true,
     commits: meta.commits || null,
+    commitsAhead: typeof meta.commitsAhead === 'number' ? meta.commitsAhead : 0,
     branches: meta.branches || null,
     stashCount: typeof meta.stashCount === 'number' ? meta.stashCount : 0,
     comparison: meta.comparison || null,
+    additionsTotal: typeof meta.additionsTotal === 'number' ? meta.additionsTotal : 0,
+    deletionsTotal: typeof meta.deletionsTotal === 'number' ? meta.deletionsTotal : 0,
     pullRequest: meta.pullRequest || null,
     ci: meta.ci || null,
   }
@@ -80,10 +83,8 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
   const snapshot = useSession ? useSession((s) => s) : null
 
   const source = React.useMemo(() => {
-    if (projected !== undefined && projected !== null) return projected
-    return (
-      findToolResult(snapshot, 'git_workspace') || findToolResult(snapshot, 'git_status')
-    )
+    const toolResult = findToolResult(snapshot, 'git_workspace') || findToolResult(snapshot, 'git_status')
+    return toolResult || projected
   }, [projected, snapshot])
   const { data, errorText } = React.useMemo(() => extractProjected(source), [source])
 
@@ -95,6 +96,24 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
     setPending(true)
     return sessionPrompt(sessionId, REFRESH_PROMPT).finally(() => setPending(false))
   }, [pending, sessionId])
+
+  const sendPrompt = React.useCallback(
+    (text) => (sessionId ? sessionPrompt(sessionId, text) : Promise.resolve(false)),
+    [sessionId],
+  )
+
+  // Auto-sample once per open when the session has no workspace data yet.
+  const autoOpenRef = React.useRef(false)
+  React.useEffect(() => {
+    if (!open) {
+      autoOpenRef.current = false
+      return
+    }
+    if (autoOpenRef.current || pending || !sessionId) return
+    if (data !== null || errorText) return
+    autoOpenRef.current = true
+    refresh()
+  }, [open, data, errorText, pending, sessionId, refresh])
 
   const dirty = dirtyCount(data)
   const overall = workspaceOverallState(data)
@@ -167,6 +186,7 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
               refreshing: pending,
               canRefresh: Boolean(sessionId),
               onRefresh: refresh,
+              onPrompt: sessionId ? sendPrompt : null,
             }),
           ),
           document.body,

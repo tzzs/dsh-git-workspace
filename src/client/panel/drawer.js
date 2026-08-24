@@ -23,6 +23,7 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
   const [width, setWidth] = React.useState(initialWidth)
   const widthRef = React.useRef(width)
   widthRef.current = width
+  const asideRef = React.useRef(null)
 
   React.useEffect(() => {
     if (!open || typeof window === 'undefined') return undefined
@@ -37,62 +38,55 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
 
   const startDrag = (e) => {
     e.preventDefault()
+    if (typeof e.currentTarget.setPointerCapture === 'function') {
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch {}
+    }
     const startX = e.clientX
     const startW = widthRef.current
     const move = (ev) => setWidth(clampWidth(startW + (startX - ev.clientX)))
     const up = () => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
       try {
         localStorage.setItem(WIDTH_KEY, String(widthRef.current))
       } catch {}
     }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
   }
 
   return React.createElement(
-    React.Fragment,
-    null,
-    React.createElement('div', {
-      className: 'dgw-backdrop',
-      onClick: onClose,
+    'aside',
+    {
+      className: 'dgw-drawer',
+      role: 'complementary',
+      'aria-label': title,
+      'data-git-workspace-drawer': '',
+      ref: asideRef,
       style: {
         position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.32)',
-        zIndex: 999,
-        pointerEvents: 'auto',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        width: `${width}px`,
+        maxWidth: '92vw',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        borderLeft: '1px solid var(--dsw-alias-border-l2)',
+        zIndex: 1000,
+        display: 'flex',
+        flexDirection: 'column',
+        fontFamily: 'var(--dsw-font-family)',
+        color: 'var(--dsw-alias-label-primary)',
       },
-    }),
-    React.createElement(
-      'aside',
-      {
-        className: 'dgw-drawer',
-        role: 'dialog',
-        'aria-label': title,
-        'data-git-workspace-drawer': '',
-        style: {
-          position: 'fixed',
-          top: 0,
-          right: 0,
-          bottom: 0,
-          width: `${width}px`,
-          maxWidth: '92vw',
-          background: 'var(--dsw-alias-bg-layer-2)',
-          borderLeft: '1px solid var(--dsw-alias-border-l2)',
-          boxShadow: '-12px 0 40px rgba(0,0,0,0.18)',
-          zIndex: 1000,
-          display: 'flex',
-          flexDirection: 'column',
-          fontFamily: 'var(--dsw-font-family)',
-          color: 'var(--dsw-alias-label-primary)',
-        },
-      },
+    },
       React.createElement(
         'div',
         {
-          onMouseDown: startDrag,
+          onPointerDown: startDrag,
           role: 'separator',
           'aria-orientation': 'vertical',
           style: {
@@ -102,6 +96,7 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
             bottom: 0,
             width: 6,
             cursor: 'col-resize',
+            touchAction: 'none',
             zIndex: 2,
           },
         },
@@ -148,6 +143,5 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
         { style: { flex: '1 1 auto', overflowY: 'auto', overscrollBehavior: 'contain' } },
         children,
       ),
-    ),
   )
 }

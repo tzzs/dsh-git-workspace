@@ -148,12 +148,19 @@ State is intentionally lightweight:
 
 ## Real refresh
 
-The header toggle shows a dirty-change count badge plus an overall `StateDot`
+The composer chip shows a dirty-change count badge plus an overall `StateDot`
 (CI failing → red, running → blue ring, dirty tree → amber, clean → green).
 The drawer's refresh button routes through the sessions service
 (`binding(sessionId).session.prompt(...)`) and asks the agent to run
 `git_workspace` again — there is no client-side tool RPC, so this is the one
 legitimate way to pull fresh data. The empty-state CTA uses the same path.
+
+The local auto-sampler is throttled: before every full sample it takes a cheap
+local fingerprint (`git rev-parse HEAD` + `git status --porcelain`), skips the
+sample entirely when that fingerprint is unchanged within a 30 s window, and
+collapses overlapping samples per session into one in-flight run. Git/gh
+subprocesses carry a hard 20 s timeout so a hung `gh` can never leave a
+dangling sample.
 
 ## Loading / empty / error states
 

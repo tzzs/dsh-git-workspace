@@ -26,6 +26,7 @@ export interface WorkspaceMeta {
   files?: FileMeta[]
   filesTruncated?: boolean
   commits?: CommitMeta[]
+  commitsAhead?: number
   branches?: Array<{ name: string; current: boolean; upstream: string | null; ahead: number; behind: number }>
   stashCount?: number
   additionsTotal?: number
@@ -37,6 +38,7 @@ export interface WorkspaceMeta {
     state: string
     draft: boolean
     url: string
+    updatedAt?: string | null
     comments?: WorkspaceCommentMeta[]
   } | null
   ci: { status: string; checks: CheckMeta[] } | null
@@ -193,6 +195,7 @@ export function toWorkspaceMeta(w: {
     state: string
     draft: boolean
     url: string
+    updatedAt?: string | null
     comments?: WorkspaceCommentMeta[]
   } | null
   ci: { status: string; checks: CheckRun[] } | null
@@ -209,7 +212,7 @@ export function toWorkspaceMeta(w: {
     },
     clean: w.workspace.clean,
     ...(w.files ? { files: w.files.map(fileMeta), filesTruncated: w.filesTruncated === true } : {}),
-    ...(w.commits ? { commits: w.commits.recent.map(commitMeta) } : {}),
+    ...(w.commits ? { commits: w.commits.recent.map(commitMeta), commitsAhead: w.commits.ahead } : {}),
     ...(w.branches && w.branches.length ? { branches: w.branches } : {}),
     ...(typeof w.stashCount === 'number' && w.stashCount > 0 ? { stashCount: w.stashCount } : {}),
     ...(typeof w.additionsTotal === 'number' ? { additionsTotal: w.additionsTotal } : {}),

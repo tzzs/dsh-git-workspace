@@ -16,10 +16,10 @@ export function CiRow({ block }) {
   const body = React.createElement(
     React.Fragment,
     null,
-    checks.slice(0, 10).map((c) =>
+    checks.slice(0, 10).map((c, i) =>
       React.createElement(
         Row,
-        { key: c.name, className: 'dgw-row' },
+        { key: `${c.name}:${i}`, className: 'dgw-row' },
         React.createElement(Dot, { state: checkDotState(c), size: 8 }),
         React.createElement(
           'span',

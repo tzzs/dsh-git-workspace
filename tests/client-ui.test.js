@@ -218,10 +218,12 @@ function renderHeader(conversation, { open = false, pending = false, sessionId =
     ? {
         ...React,
         useState: (() => {
+          // Positional overrides with init fallback: hook N gets states[N] when
+          // provided, otherwise its own real initial value.
           const states = [true, pending]
           let call = 0
-          return () => {
-            const value = call < states.length ? states[call] : true
+          return (init) => {
+            const value = call < states.length ? states[call] : init
             call += 1
             return [value, () => {}]
           }
@@ -235,13 +237,43 @@ function renderHeader(conversation, { open = false, pending = false, sessionId =
 }
 
 // Execute the Drawer component against its element props so the rendered
-// backdrop/aside structure can be asserted without a real React renderer.
+// aside structure can be asserted without a real React renderer. The panel
+// is a docked sidebar: no backdrop, the aside is the root element.
 function execDrawer(drawerEl) {
   assert.equal(typeof drawerEl.type, 'function', 'drawer is a component element')
-  const fragment = drawerEl.type(drawerEl.props)
-  const aside = fragment.children[1]
-  const backdrop = fragment.children[0]
-  return { fragment, backdrop, aside }
+  const aside = drawerEl.type(drawerEl.props)
+  return { aside }
+}
+
+// Walk a rendered tree, executing function components in place, and collect
+// every text node so string-level assertions work across nested sections.
+function collectText(node, out = [], depth = 0) {
+  if (depth > 30 || node === null || node === undefined) return out
+  if (typeof node === 'string' || typeof node === 'number') {
+    out.push(String(node))
+    return out
+  }
+  if (Array.isArray(node)) {
+    for (const n of node) collectText(n, out, depth + 1)
+    return out
+  }
+  if (typeof node !== 'object') return out
+  let current = node
+  while (typeof current?.type === 'function') {
+    try {
+      current = current.type(current.props || {})
+    } catch {
+      return out
+    }
+    if (current === null || current === undefined) return out
+  }
+  const kids = []
+  const props = current && typeof current === 'object' ? current.props : undefined
+  if (props && props.children !== undefined) kids.push(props.children)
+  if (current && typeof current === 'object' && !Array.isArray(current.children) && current.children !== undefined) kids.push(current.children)
+  else if (Array.isArray(current?.children)) kids.push(current.children)
+  for (const k of kids) collectText(k, out, depth + 1)
+  return out
 }
 
 test('Git Workspace drawer opens with conversation data', () => {
@@ -274,9 +306,9 @@ test('Git Workspace drawer opens with conversation data', () => {
   }
   const tree = renderHeader(conversation, { open: true })
   assert.equal(tree.children.length, 2, 'toggle + drawer render while open')
-  const { backdrop, aside } = execDrawer(tree.children[1].el)
-  assert.equal(typeof backdrop.props.onClick, 'function', 'backdrop closes on click')
+  const { aside } = execDrawer(tree.children[1].el)
   assert.equal(aside.props['data-git-workspace-drawer'], '', 'drawer aside is rendered')
+  assert.equal(aside.props.role, 'complementary', 'renders as a docked sidebar landmark')
   const scrollArea = aside.children[2]
   const panelEl = scrollArea.children[0]
   assert.equal(typeof panelEl.type, 'function', 'drawer hosts the workspace panel')
@@ -373,4 +405,49 @@ test('closed toggle omits badge for a clean workspace', () => {
     (c) => c && c.props && c.props.style && c.props.style.minWidth === '16px',
   )
   assert.equal(badge, undefined, 'no dirty badge when clean')
+})
+
+test('panel surfaces truncation hints and +N more rows', () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 3, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: false,
+          filesTruncated: true,
+          files: [1, 2, 3].map((i) => ({ path: `src/f${i}.ts`, oldPath: null, status: 'modified', staged: false })),
+          commits: [],
+          branches: Array.from({ length: 13 }, (_, i) => ({ name: `b${i}`, current: i === 0, upstream: null, ahead: 0, behind: 0 })),
+          pullRequest: null,
+          ci: {
+            status: 'in_progress',
+            checks: Array.from({ length: 17 }, (_, i) => ({ name: `check-${i}`, status: 'queued' })),
+          },
+        },
+      },
+    ],
+  }
+  const tree = renderHeader(conversation, { open: true })
+  const { aside } = execDrawer(tree.children[1].el)
+  const panelEl = aside.children[2].children[0]
+  const body = panelEl.type(panelEl.props)
+  const text = collectText(body).join('\n')
+  assert.ok(text.includes('File list truncated'), 'filesTruncated hint renders')
+  const { plugin } = loadBundle()
+  const { registrations } = collectRegistrations(plugin)
+  const ciComp = registrations.find((r) => r.def.key === 'github_ci').comp
+  const ciText = collectText(
+    ciComp({
+      block: settledBlock({
+        status: 'in_progress',
+        checks: Array.from({ length: 12 }, (_, i) => ({ name: `check-${i}`, status: 'queued' })),
+      }),
+    }),
+  ).join('\n')
+  assert.ok(ciText.includes('+2 more'), 'ci card +N more renders')
 })
