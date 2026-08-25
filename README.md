@@ -357,11 +357,10 @@ make check
 Build output is written to `lib/`. To validate the Agent Loop integration:
 
 ```bash
-npm run build
-node scripts/agent-loop-integration.mjs
+make integration   # or: make agent-loop
 ```
 
-This uses the real Harness Agent Loop and ToolRuntime with a scripted LLM adapter, verifying discovery, invocation, and results for all 34 Tools without a real LLM account (write tools are executed only inside throwaway fixture repositories).
+This uses the real Harness Agent Loop and ToolRuntime with a scripted LLM adapter, verifying discovery, invocation, and results for all 34 Tools without a real LLM account. It requires `@deepseek-ai/dsh` installed globally (`npm i -g @deepseek-ai/dsh`); the script resolves the package at runtime, or set `DSH_GLOBAL_ROOT` to its directory explicitly. Tests import compiled output from `lib/`, so always run tests through `npm test`/`make test` — running `node --test` directly against a stale `lib/` fails fast with a clear message thanks to the freshness guard in `tests/lib-fresh.test.js`.
 
 To verify the plugin in the browser UI, serve it through an isolated local `web` profile:
 

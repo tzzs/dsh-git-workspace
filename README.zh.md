@@ -354,11 +354,10 @@ make check
 构建产物位于 `lib/`，本地验证 Agent Loop：
 
 ```bash
-npm run build
-node scripts/agent-loop-integration.mjs
+make integration   # 或:make agent-loop
 ```
 
-该脚本使用 Harness 的真实 Agent Loop、ToolRuntime 和脚本化 LLM adapter，验证 34 个 Tool 的发现、调用和结果返回，不需要真实 LLM 账号（写 Tool 只在一次性临时 fixture 仓库中执行）。
+该脚本使用 Harness 的真实 Agent Loop、ToolRuntime 和脚本化 LLM adapter，验证 34 个 Tool 的发现、调用和结果返回，不需要真实 LLM 账号。前提是全局安装了 `@deepseek-ai/dsh`(`npm i -g @deepseek-ai/dsh`);脚本会在运行时自动解析包位置，也可以通过 `DSH_GLOBAL_ROOT` 显式指定。测试导入的是编译产物 `lib/`,请始终通过 `npm test` / `make test` 运行测试——直接跑 `node --test` 时,`tests/lib-fresh.test.js` 的守卫会在 `lib/` 过期或缺失时立即报错并给出明确提示。
 
 ### 官方 profile 验证
 
