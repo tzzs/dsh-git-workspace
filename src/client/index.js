@@ -29,6 +29,14 @@ const TOOLVIEW = [
   ['git_worktrees', GenericRow],
   ['git_stash', GenericRow],
   ['git_tags', GenericRow],
+  ['git_stage', GenericRow],
+  ['git_unstage', GenericRow],
+  ['git_commit', GenericRow],
+  ['git_branch_create', GenericRow],
+  ['git_push', GenericRow],
+  ['git_checkout', GenericRow],
+  ['git_merge', GenericRow],
+  ['git_reset', GenericRow],
   ['github_pr_diff', GenericRow],
   ['github_pr_reviews', GenericRow],
   ['github_pr_comments', GenericRow],
@@ -36,6 +44,9 @@ const TOOLVIEW = [
   ['github_issue', GenericRow],
   ['github_issue_comments', GenericRow],
   ['github_releases', GenericRow],
+  ['github_pr_merge', GenericRow],
+  ['github_pr_comment', GenericRow],
+  ['github_pr_review', GenericRow],
 ]
 
 function registerSlot(ctx, slot, def, component) {

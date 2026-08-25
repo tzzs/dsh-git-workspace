@@ -109,8 +109,10 @@ test('client registers a toolview for every Git/GitHub tool', () => {
     'git_workspace', 'git_status', 'git_diff', 'git_commits', 'git_show',
     'github_pr', 'github_pr_create', 'github_ci', 'git_files', 'git_compare', 'git_blame',
     'git_branches', 'git_remotes', 'git_worktrees', 'git_stash', 'git_tags',
+    'git_stage', 'git_unstage', 'git_commit', 'git_branch_create', 'git_push', 'git_checkout', 'git_merge', 'git_reset',
     'github_pr_diff', 'github_pr_reviews', 'github_pr_comments',
     'github_ci_logs', 'github_issue', 'github_issue_comments', 'github_releases',
+    'github_pr_merge', 'github_pr_comment', 'github_pr_review',
   ]
   assert.deepEqual(keys, expected)
 })

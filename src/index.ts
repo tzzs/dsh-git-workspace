@@ -20,6 +20,14 @@ import {
   gitWorktrees,
   gitStash,
   gitTags,
+  gitStage,
+  gitUnstage,
+  gitCommit,
+  gitBranchCreate,
+  gitPush,
+  gitCheckout,
+  gitMerge,
+  gitReset,
   githubPr,
   githubPrCreate,
   githubPrDiff,
@@ -30,6 +38,9 @@ import {
   githubIssue,
   githubIssueComments,
   githubReleases,
+  githubPrMerge,
+  githubPrComment,
+  githubPrReview,
 } from './tools/index.js'
 import type { DiffFile } from './types.js'
 import {
@@ -533,6 +544,294 @@ export function apply(ctx: {
     },
   })
 
+  // ---- git_stage ---------------------------------------------------------
+  register(ctx, {
+    name: 'git_stage',
+    description:
+      'Write tool. Mutates the Git index by staging working-tree files (git add). Pass paths to stage specific files or all:true to stage everything.',
+    parameters: { paths: { type: 'array', items: { type: 'string' } }, all: bool },
+    execute: (a) => gitStage(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`stage failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as { staged?: string[]; all?: boolean }
+      if (v.all) return text('Staged all working-tree changes.')
+      const staged = v.staged ?? []
+      return text(
+        staged.length
+          ? `Staged ${staged.length} file(s):\n${staged.map((p) => `+ ${p}`).join('\n')}`
+          : 'Nothing staged.',
+      )
+    },
+    presenters: {
+      presentCall: () => genericCall('Stage files'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Stage') ?? 'Stage',
+            result.content,
+          )
+        return genericResult('Stage', result.content)
+      },
+    },
+  })
+
+  // ---- git_unstage -------------------------------------------------------
+  register(ctx, {
+    name: 'git_unstage',
+    description:
+      'Write tool. Mutates the Git index by unstaging files (keeps working-tree changes). Pass paths or all:true.',
+    parameters: { paths: { type: 'array', items: { type: 'string' } }, all: bool },
+    execute: (a) => gitUnstage(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`unstage failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as { unstaged?: string[]; all?: boolean }
+      if (v.all) return text('Unstaged all files.')
+      const unstaged = v.unstaged ?? []
+      return text(
+        unstaged.length
+          ? `Unstaged ${unstaged.length} file(s):\n${unstaged.map((p) => `- ${p}`).join('\n')}`
+          : 'Nothing unstaged.',
+      )
+    },
+    presenters: {
+      presentCall: () => genericCall('Unstage files'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Unstage') ?? 'Unstage',
+            result.content,
+          )
+        return genericResult('Unstage', result.content)
+      },
+    },
+  })
+
+  // ---- git_commit --------------------------------------------------------
+  register(ctx, {
+    name: 'git_commit',
+    description:
+      'Write tool. Creates a commit on the current branch from staged changes. Does not stage files itself - stage them first with git_stage.',
+    parameters: { message: str, amend: bool, allowEmpty: bool },
+    execute: (a) => gitCommit(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`commit failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as {
+        sha?: string
+        shortSha?: string
+        branch?: string | null
+        message?: string
+      }
+      return text(
+        `Committed ${v.shortSha ?? v.sha ?? ''}${v.branch ? ` on ${v.branch}` : ''}\n${v.message ?? ''}`,
+      )
+    },
+    presenters: {
+      presentCall: () => genericCall('Commit staged changes'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Commit') ?? 'Commit',
+            result.content,
+          )
+        return genericResult('Commit', result.content)
+      },
+    },
+  })
+
+  // ---- git_branch_create -------------------------------------------------
+  register(ctx, {
+    name: 'git_branch_create',
+    description:
+      'Write tool. Creates a new local branch, optionally checking it out (checkout defaults to true).',
+    parameters: { name: str, startPoint: str, checkout: bool },
+    execute: (a) => gitBranchCreate(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`branch creation failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as {
+        name?: string
+        startPoint?: string | null
+        checkedOut?: boolean
+      }
+      return text(
+        `Created branch ${v.name ?? ''}${v.startPoint ? ` from ${v.startPoint}` : ''}${v.checkedOut ? ' (checked out)' : ''}.`,
+      )
+    },
+    presenters: {
+      presentCall: () => genericCall('Create branch'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Create branch') ?? 'Create branch',
+            result.content,
+          )
+        return genericResult('Branch created', result.content)
+      },
+    },
+  })
+
+  // ---- git_push ----------------------------------------------------------
+  register(ctx, {
+    name: 'git_push',
+    description:
+      'Write tool. Publishes local commits to a remote branch. force:true rewrites remote history - destructive on shared branches.',
+    parameters: { remote: str, branch: str, force: bool, setUpstream: bool },
+    execute: (a) => gitPush(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`push failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as {
+        remote?: string
+        branch?: string
+        upstream?: string | null
+        forced?: boolean
+      }
+      return text(
+        `Pushed ${v.branch ?? ''} to ${v.remote ?? ''}${v.forced ? ' (forced)' : ''}${v.upstream ? `\nupstream: ${v.upstream}` : ''}`,
+      )
+    },
+    presenters: {
+      presentCall: () => genericCall('Push commits'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Push') ?? 'Push',
+            result.content,
+          )
+        return genericResult('Push', result.content)
+      },
+    },
+  })
+
+  // ---- git_checkout ------------------------------------------------------
+  register(ctx, {
+    name: 'git_checkout',
+    description:
+      'Write tool. Switches the working tree to another branch (or creates it with create:true). May fail when local changes would be overwritten.',
+    parameters: { branch: str, create: bool },
+    execute: (a) => gitCheckout(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`checkout failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as {
+        branch?: string
+        created?: boolean
+        previous?: string | null
+      }
+      return text(
+        `${v.created ? 'Created and checked out' : 'Checked out'} ${v.branch ?? ''}${v.previous ? ` (from ${v.previous})` : ''}.`,
+      )
+    },
+    presenters: {
+      presentCall: () => genericCall('Checkout branch'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Checkout') ?? 'Checkout',
+            result.content,
+          )
+        return genericResult('Checkout', result.content)
+      },
+    },
+  })
+
+  // ---- git_merge ---------------------------------------------------------
+  register(ctx, {
+    name: 'git_merge',
+    description:
+      'Write tool. Merges another branch into the current branch. On conflicts returns conflictedFiles without aborting - resolve manually.',
+    parameters: { branch: str, message: str, squash: bool, noFastForward: bool },
+    execute: (a) => gitMerge(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`merge failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as {
+        merged?: boolean
+        branch?: string
+        sha?: string | null
+        squash?: boolean
+        conflictedFiles?: string[]
+      }
+      const conflicts = v.conflictedFiles ?? []
+      if (!v.merged && conflicts.length > 0) {
+        return text(
+          `Merge of ${v.branch ?? ''} stopped on conflicts in ${conflicts.length} file(s):\n${conflicts.join('\n')}`,
+        )
+      }
+      return text(
+        `Merged ${v.branch ?? ''}${v.squash ? ' (squash)' : ''}${v.sha ? ` at ${v.sha}` : ''}.`,
+      )
+    },
+    presenters: {
+      presentCall: () => genericCall('Merge branch'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Merge') ?? 'Merge',
+            result.content,
+          )
+        return genericResult('Merge', result.content)
+      },
+    },
+  })
+
+  // ---- git_reset ---------------------------------------------------------
+  register(ctx, {
+    name: 'git_reset',
+    description:
+      'Write tool. Moves the current branch and optionally rewrites index/working tree. mode:\'hard\' DISCARDS all uncommitted changes and requires confirm:true.',
+    parameters: {
+      mode: { type: 'string', enum: ['soft', 'mixed', 'hard'] },
+      ref: str,
+      confirm: bool,
+    },
+    execute: (a) => gitReset(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`reset failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as { mode?: string; ref?: string; shortSha?: string }
+      return text(`Reset (${v.mode ?? 'mixed'}) to ${v.ref ?? 'HEAD'} (${v.shortSha ?? ''}).`)
+    },
+    presenters: {
+      presentCall: () => genericCall('Reset branch'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Reset') ?? 'Reset',
+            result.content,
+          )
+        return genericResult('Reset', result.content)
+      },
+    },
+  })
+
   // ---- github_pr ---------------------------------------------------------
   register(ctx, {
     name: 'github_pr',
@@ -793,6 +1092,113 @@ export function apply(ctx: {
             result.content,
           )
         return genericResult('Releases', result.content)
+      },
+    },
+  })
+
+  // ---- github_pr_merge ---------------------------------------------------
+  register(ctx, {
+    name: 'github_pr_merge',
+    description:
+      'Write tool. Merges a GitHub pull request via the gh CLI - an irreversible remote mutation. Optionally deletes the head branch.',
+    parameters: {
+      number: int,
+      method: { type: 'string', enum: ['merge', 'squash', 'rebase'] },
+      deleteBranch: bool,
+      subject: str,
+      body: str,
+    },
+    execute: (a) => githubPrMerge(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; code?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`PR merge failed: ${e.message ?? e.code ?? 'unknown error'}${hint}`)
+      }
+      const v = value as {
+        number?: number
+        merged?: boolean
+        method?: string
+        branchDeleted?: boolean
+        url?: string | null
+      }
+      return text(
+        `Merged PR #${v.number} (${v.method ?? 'merge'})${v.branchDeleted ? ', head branch deleted' : ''}${v.url ? `\n${v.url}` : ''}`,
+      )
+    },
+    presenters: {
+      presentCall: () => genericCall('Merge pull request'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Merge pull request') ?? 'Merge pull request',
+            result.content,
+          )
+        return genericResult('Pull request merged', result.content)
+      },
+    },
+  })
+
+  // ---- github_pr_comment -------------------------------------------------
+  register(ctx, {
+    name: 'github_pr_comment',
+    description:
+      'Write tool. Posts a comment on a GitHub pull request via the gh CLI.',
+    parameters: { number: int, body: str },
+    execute: (a) => githubPrComment(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; code?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`PR comment failed: ${e.message ?? e.code ?? 'unknown error'}${hint}`)
+      }
+      const v = value as { number?: number; url?: string | null }
+      return text(`Commented on PR #${v.number}${v.url ? `\n${v.url}` : ''}`)
+    },
+    presenters: {
+      presentCall: () => genericCall('Add PR comment'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Add PR comment') ?? 'Add PR comment',
+            result.content,
+          )
+        return genericResult('PR comment added', result.content)
+      },
+    },
+  })
+
+  // ---- github_pr_review --------------------------------------------------
+  register(ctx, {
+    name: 'github_pr_review',
+    description:
+      'Write tool. Submits a review (APPROVE / REQUEST_CHANGES / COMMENT) on a GitHub pull request via the gh CLI.',
+    parameters: {
+      number: int,
+      state: { type: 'string', enum: ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'] },
+      body: str,
+    },
+    execute: (a) => githubPrReview(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; code?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`review failed: ${e.message ?? e.code ?? 'unknown error'}${hint}`)
+      }
+      const v = value as { number?: number; state?: string; url?: string | null }
+      return text(
+        `Submitted review on PR #${v.number}: ${v.state ?? 'COMMENT'}${v.url ? `\n${v.url}` : ''}`,
+      )
+    },
+    presenters: {
+      presentCall: () => genericCall('Submit review'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Submit review') ?? 'Submit review',
+            result.content,
+          )
+        return genericResult('Review submitted', result.content)
       },
     },
   })

@@ -55,13 +55,16 @@ window.__ModuleLoader__.load({
    The drawer body has two tabs:
 
    - **Source Control** — overview card (branch, upstream, total `+adds/-dels`
-     from per-file numstat, CI dot, comparison vs base, stash count) plus
-     collapsible cards for Changes and Untracked files (directory-tree grouping,
-     per-file stats and status letters), Recent commits, and Branches.
-   - **Pull Request** — PR state pill + link, CI status card (per-check rows),
-     and comments grouped into Unresolved / Resolved sections. Comments are
-     aggregated by the backend: `git_workspace` fetches the current branch's PR
-     review threads when a pull request exists.
+     from per-file numstat, CI dot, comparison vs base, stash count), a commit
+     box with a Git action menu, collapsible cards for Changes and Untracked
+     files (directory-tree grouping, per-file stats and status letters,
+     inline diff viewer, per-file Stage/Unstage buttons), and Recent commits.
+   - **Pull Request** — PR state pill + link, a Merge & review card (merge
+     method choice, delete-branch checkbox, Approve / Request-changes buttons),
+     CI status card (per-check rows), comments grouped into Unresolved /
+     Resolved sections, and a comment composer. Comments are aggregated by the
+     backend: `git_workspace` fetches the current branch's PR review threads
+     when a pull request exists.
 
 ## Component structure
 
@@ -88,7 +91,8 @@ src/client/
     ├── drawer.js             # reusable side drawer: backdrop, ESC close, drag-resize,
     │                         #   width persistence, slide-in animation
     └── workspace-panel.js    # collapsible sections: changes (grouped staged/unstaged/
-                              #   untracked with copy-path), commits, branches, PR, CI
+                              #   untracked with copy-path + stage controls), commits,
+                              #   PR merge/review, plus the commit box and action menu
 ```
 
 ## Data flow
@@ -209,10 +213,55 @@ dangling sample.
 
 Read tools are the foundation: the UI inspects, searches, diffs, browses,
 opens, and refreshes, and the panel's refresh re-reads the existing session
-snapshot without invoking any mutation. Write operations arrive through
-dedicated backend tools (`github_pr_create` today; riskier ones later) and are
-always explicit user actions — a button press or an agent turn the user
+snapshot without invoking any mutation. Write operations run only through the
+dedicated backend write tools (`github_pr_create`, `git_stage`, `git_unstage`,
+`git_commit`, `git_branch_create`, `git_push`, `git_checkout`, `git_merge`,
+`git_reset`, `github_pr_merge`, `github_pr_comment`, `github_pr_review`) and
+are always explicit user actions — a button press or an agent turn the user
 initiated — never fired by automatic sampling or refresh paths.
+
+## Write controls in the panel
+
+The panel exposes the write tools as compact controls. The UI cannot call
+tools directly (no client→tool RPC in DSH), so every control emits one queued
+agent turn whose text names exactly which tool to run and with which
+arguments — deterministic forwarding, not free-form chat.
+
+Source Control tab:
+
+- **Per-file Stage/Unstage** — every row in the Changes and Untracked cards
+  carries a `Stage`/`Unstage` button that prompts `git_stage`/`git_unstage`
+  for that exact path.
+- **Stage All / Unstage All** — header buttons that prompt the same tools
+  with `all:true`.
+- **Commit box** — a message textarea (Ctrl/Cmd+Enter submits) plus a primary
+  button: it reads `Commit` when a message is typed and falls back to
+  `Stage All` when empty.
+- **Git action menu** — an overflow menu next to the commit box with Commit,
+  Commit & Push, Commit & Sync (`git_stage` → `git_commit` → `git_push`
+  prompt chains), Push, Force Push (framed as force-with-lease semantics),
+  New Branch / Switch Branch / Merge Branch (each opens a small name input,
+  then prompts `git_branch_create` / `git_checkout` / `git_merge`),
+  Create PR / Push before PR (`github_pr_create`; disabled with a note while
+  a pull request already exists), read-only sync entries (Pull, Fast-forward,
+  Sync, Rebase from upstream, Fetch, Publish), and Discard Changes
+  (`git_reset`, with the confirm:true requirement spelled out).
+
+Pull Request tab:
+
+- **Merge & review card** — a Merge/Squash/Rebase segmented choice (defaults
+  to Squash) and a "Delete source branch" checkbox feed one big merge button
+  that prompts `github_pr_merge` with `method` and, when checked,
+  `deleteBranch:true`. Below it, Approve and Request changes buttons prompt
+  `github_pr_review` (`REQUEST_CHANGES` notes that a review body is
+  required). Both sections disable themselves once the PR is merged or
+  closed.
+- **Comment composer** — a textarea + Comment button that prompts
+  `github_pr_comment` with the PR number and body.
+
+Because each control rides a normal agent turn, every mutation still flows
+through the backend's validation, structured errors, and blast-radius guards
+(such as the hard-reset confirmation gate) — the UI adds no bypass path.
 
 ## Building the client
 
@@ -226,10 +275,11 @@ classic script DSH serves at `/plugins/@tzzs/dsh-git-workspace/client.js`.
 
 ## Future mutation
 
-The toolview + panel architecture is ready for further write tools — including
-riskier ones such as force-push, reset, and merge (see the roadmap in
-`docs/deepseek-harness-integration.md`) — without structural change. The panel
-is the natural home for their controls. Rules that hold no matter how risky a
-tool is: its description states what it can destroy; it runs only from an
-explicit user action or agent turn (never automatic sampling/refresh); and the
-UI pairs destructive buttons with confirmation before prompting.
+The write tools above shipped through the existing toolview + panel
+architecture without structural change, and further risky operations (such as
+`github_pr_close`) slot in the same way: register the tool in `src/index.ts`
+with a blast-radius description, then add a panel control that forwards a
+deterministic prompt. Rules that hold no matter how risky a tool is: its
+description states what it can destroy; it runs only from an explicit user
+action or agent turn (never automatic sampling/refresh); and the UI pairs
+destructive buttons with confirmation before prompting.

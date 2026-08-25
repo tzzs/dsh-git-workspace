@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Read-only Git/GitHub tool plugin (`@tzzs/dsh-git-workspace`) for DeepSeek Harness. Six tools: `git_workspace`, `git_status`, `git_files`, `git_diff`, `git_commits`, `github_pr`. Entry point is `src/index.ts` (`apply(ctx)` registers tools via `ctx.tools.register`).
+Read/write Git/GitHub tool plugin (`@tzzs/dsh-git-workspace`) for DeepSeek Harness. Thirty-four tools in two groups: 22 read-only discovery tools (including the original six: `git_workspace`, `git_status`, `git_files`, `git_diff`, `git_commits`, `github_pr`) and 12 write tools (`github_pr_create`, `github_pr_merge`, `github_pr_comment`, `github_pr_review`, `git_stage`, `git_unstage`, `git_commit`, `git_branch_create`, `git_push`, `git_checkout`, `git_merge`, `git_reset`). Entry point is `src/index.ts` (`apply(ctx)` registers tools via `ctx.tools.register`).
 
 ## Build & verify
 

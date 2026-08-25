@@ -2,20 +2,21 @@
 
 > [中文](README.zh.md)
 
-`@tzzs/dsh-git-workspace` is a read-only Git / GitHub Coding Workflow Workspace plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) agents. It uses the official `dsh.bundle`, profile, and Cordis plugin mechanisms and does not modify DeepSeek Harness itself.
+`@tzzs/dsh-git-workspace` is a Git / GitHub Coding Workflow Workspace plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) agents. It uses the official `dsh.bundle`, profile, and Cordis plugin mechanisms and does not modify DeepSeek Harness itself.
 
-Version 1 remains **read-only**. It does not commit, push, checkout, stage, merge, branch, create PRs, write comments/reviews, or modify source code automatically.
+The plugin started fully **read-only** and is growing mutation support incrementally. It now ships 22 read-only tools plus 12 write tools. Read tools remain side-effect-free and are the foundation; every write tool states its blast radius in its description (`Write tool. ...`), validates all arguments before touching Git/`gh`, and is triggered only by an explicit user action or agent turn — never by automatic sampling or refresh paths. Destructive operations are gated: hard reset refuses to run without an explicit `confirm:true`, and force-push only happens when explicitly requested (`force:true`), never automatically.
 
 ### Design goals
 
 - **Agent-first**: every tool returns structured, typed data — not raw CLI stdout.
 - **Bounded context**: diffs, commits, and logs are summarized and paged to protect Agent context.
 - **Safe execution**: all Git/`gh` commands run through `execFile(command, argv)`. User input is never interpolated into a shell command.
+- **Blast-radius discipline**: write tools describe what they can destroy in their descriptions; hard resets require `confirm:true`; force-push is opt-in only.
 - **Backward compatible**: the original six tools keep their names, parameters, and return shapes.
 
 ### Tools
 
-The plugin provides 22 Agent Tools, organized by category.
+The plugin provides 34 Agent Tools — 22 read-only discovery tools plus 12 write tools — organized by category.
 
 #### Workspace
 
@@ -44,6 +45,32 @@ The plugin provides 22 Agent Tools, organized by category.
 | `git_worktrees` | List all worktrees (read-only) |
 | `git_stash` | List stash entries (read-only) |
 | `git_tags` | List tags with commit and tagger info |
+
+#### Write (Git)
+
+Mutation tools over the local repository. Each one returns a structured result and never shells out; invalid input (leading `-`, NUL bytes) is rejected before Git runs.
+
+| Tool | Description |
+| --- | --- |
+| `git_stage` | Stage working-tree files into the index (`paths` or `all:true`) |
+| `git_unstage` | Unstage files while keeping the working-tree changes (`paths` or `all:true`) |
+| `git_commit` | Create a commit on the current branch from staged changes (message required; `amend`/`allowEmpty` optional) |
+| `git_branch_create` | Create a local branch from an optional start point, checked out by default |
+| `git_checkout` | Switch to another branch, or create it first with `create:true`; refuses when local changes would be overwritten |
+| `git_merge` | Merge another branch into the current one; conflicts come back as `conflictedFiles` instead of being resolved automatically |
+| `git_push` | Push a branch to a remote (sets upstream by default); `force:true` rewrites remote history and is never applied automatically |
+| `git_reset` | Move the current branch (`soft`/`mixed`/`hard`); `hard` discards all uncommitted changes and requires explicit `confirm:true` |
+
+#### Write (GitHub)
+
+Mutation tools over GitHub via the `gh` CLI. They require an authenticated `gh` and mutate only what their arguments name.
+
+| Tool | Description |
+| --- | --- |
+| `github_pr_create` | Open a PR for a branch via `gh pr create`; fills title/body from commit history unless both are given |
+| `github_pr_merge` | Merge a PR (`merge`/`squash`/`rebase`), optionally deleting the head branch — irreversible on the remote |
+| `github_pr_comment` | Post a comment on a PR |
+| `github_pr_review` | Submit a review (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`; requesting changes requires a body) |
 
 #### GitHub
 
@@ -99,11 +126,18 @@ curl -s http://127.0.0.1:PORT/ | grep -o '"id":"@tzzs[^}]*}'
 # "id":"@tzzs/dsh-git-workspace","url":"/plugins/@tzzs/dsh-git-workspace/client.js?rev=..."
 ```
 
-### Read-only
+### Read-first, with explicit write controls
 
-The UI mirrors the backend: it inspects, searches, diffs, browses, opens, and
-refreshes. It does **not** stage, commit, push, checkout, merge, or create PRs.
-Stage/commit controls are deliberately deferred to a future mutation phase.
+The UI mirrors the backend's evolution. It still inspects, searches, diffs,
+browses, opens, and refreshes, and now also surfaces write controls that are
+wired to the new write tools: per-file Stage/Unstage buttons, Stage All /
+Unstage All, a commit box (commit, push, branch actions), a PR merge control
+with merge-method choice and delete-branch checkbox, Approve / Request-changes
+review buttons, and a comment composer. The UI cannot call tools directly —
+every control emits one queued agent turn whose text names the exact
+`git_*`/`github_*` write tool and arguments, so nothing mutates without a
+model-visible turn the user initiated. Automatic sampling and refresh paths
+never fire writes. See [docs/ui.md](docs/ui.md) for details.
 
 ### Installation
 
@@ -180,7 +214,31 @@ git_stash()
 
 git_tags()
 
+git_stage({ paths?, all? })
+
+git_unstage({ paths?, all? })
+
+git_commit({ message, amend?, allowEmpty? })
+
+git_branch_create({ name, startPoint?, checkout? })
+
+git_push({ remote?, branch?, force?, setUpstream? })
+
+git_checkout({ branch, create? })
+
+git_merge({ branch, message?, squash?, noFastForward? })
+
+git_reset({ mode?, ref?, confirm? })
+
 github_pr()
+
+github_pr_create({ title?, body?, base?, head?, draft? })
+
+github_pr_merge({ number, method?, deleteBranch?, subject?, body? })
+
+github_pr_comment({ number, body })
+
+github_pr_review({ number, state?, body? })
 
 github_pr_diff({ number, path?, offset?, limit? })
 
@@ -261,6 +319,7 @@ Stable error codes include:
 
 - Git: `NOT_A_GIT_REPOSITORY`, `GIT_COMMAND_FAILED`, `INVALID_GIT_ARGUMENT`, `INVALID_PATH`, `REVISION_NOT_FOUND`
 - GitHub: `NO_GITHUB_REMOTE`, `NOT_GITHUB_REPOSITORY`, `GH_NOT_INSTALLED`, `GH_NOT_AUTHENTICATED`, `GITHUB_QUERY_FAILED`, `GITHUB_RESOURCE_NOT_FOUND`, `GITHUB_PERMISSION_DENIED`
+- Write tools: `NOTHING_TO_COMMIT`, `BRANCH_ALREADY_EXISTS`, `BRANCH_NOT_FOUND`, `DIRTY_WORKTREE`, `HARD_RESET_REQUIRES_CONFIRM`, `GIT_PUSH_REJECTED`, `GITHUB_PR_NOT_MERGEABLE`
 
 Underlying exception stack traces are never exposed to the Agent.
 
@@ -268,11 +327,12 @@ Underlying exception stack traces are never exposed to the Agent.
 
 - All Git and `gh` commands run through `execFile(command, argv)`.
 - User input is never interpolated into a shell command.
-- Revisions, paths, branches, PR numbers, issue numbers, and queries are validated: NUL bytes are rejected, and arguments that begin with `-` are rejected for revisions and paths.
+- Revisions, paths, branches, PR numbers, issue numbers, and queries are validated: NUL bytes are rejected, and arguments that begin with `-` are rejected for revisions, paths, branch names, and remotes.
 - Paths are always placed after `--` (e.g. `git diff revision -- path`), never as bare trailing arguments.
 - There is no universal `git_execute` / `github_execute` tool.
 - Diff, commit, blame, and CI-log results are bounded and paged by default.
-- The plugin performs no destructive Git operations.
+- Destructive operations are gated: `git_reset` in `hard` mode refuses to run without `confirm:true`, and remote history is rewritten only when a caller explicitly passes `force:true`.
+- Write tools run only from an explicit user action or agent turn — never from automatic sampling or refresh paths.
 
 ### Development
 
@@ -301,7 +361,7 @@ npm run build
 node scripts/agent-loop-integration.mjs
 ```
 
-This uses the real Harness Agent Loop and ToolRuntime with a scripted LLM adapter, verifying discovery, invocation, and results for all 22 Tools without a real LLM account.
+This uses the real Harness Agent Loop and ToolRuntime with a scripted LLM adapter, verifying discovery, invocation, and results for all 34 Tools without a real LLM account (write tools are executed only inside throwaway fixture repositories).
 
 To verify the plugin in the browser UI, serve it through an isolated local `web` profile:
 
@@ -346,5 +406,6 @@ make pack
 ### Roadmap
 
 - ✅ Git Workspace UI (read-only): compact tool cards + persistent workspace panel
-- Phase 2 mutation (currently not implemented): `git_branch_create`, `git_stage`, `git_unstage`, `git_commit`, `git_push`, `git_checkout`, `git_merge`, `github_pr_create`, `github_pr_merge`, `github_pr_comment`, `github_pr_review`
-- Stage / commit / PR controls wired into the Git Workspace panel (future mutation)
+- ✅ Phase 2 mutation tools: `git_branch_create`, `git_stage`, `git_unstage`, `git_commit`, `git_push`, `git_checkout`, `git_merge`, `git_reset`, `github_pr_create`, `github_pr_merge`, `github_pr_comment`, `github_pr_review`
+- ✅ Write controls wired into the Git Workspace panel: per-file stage/unstage, commit box with Git action menu, PR merge method choice + delete-branch checkbox, Approve/Request-changes buttons, comment composer
+- Later: further risky operations (e.g. `github_pr_close`) behind the same blast-radius rules — description states what can be destroyed, explicit user/agent trigger only
