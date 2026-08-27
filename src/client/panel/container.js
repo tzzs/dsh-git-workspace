@@ -8,16 +8,13 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { GitWorkspacePanel } from './workspace-panel.js'
 import { Drawer } from './drawer.js'
-import { sessionCommand, sessionPrompt } from '../services.js'
+import { sessionCommand } from '../services.js'
 import {
   Dot,
   IconBtn,
   ensureStyles,
   workspaceOverallState,
 } from '../components.js'
-
-const REFRESH_PROMPT =
-  'Run the git_workspace tool now and report the refreshed workspace summary.'
 
 const PROJECTION_KEY = 'tzzs.git-workspace'
 const OPEN_KEY = 'dsh-git-workspace.open'
@@ -171,40 +168,45 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // A session either has the native `dsh-commands` channel or it doesn't;
+  // once a dispatch comes back unmatched/unavailable we know it never will
+  // for this session, so the whole panel switches to a disabled, labeled
+  // state instead of ever falling back to a queued chat prompt.
+  const [commandsSupported, setCommandsSupported] = React.useState(true)
+  const markUnsupported = React.useCallback(() => setCommandsSupported(false), [])
+
   const refresh = React.useCallback(() => {
     if (pending || !sessionId) return Promise.resolve(false)
     setPending(true)
     return sessionCommand(sessionId, '/git-refresh {}')
-      .then((state) => (
-        state === 'executed'
-          ? true
-          : state === 'failed'
-            ? false
-            : sessionPrompt(sessionId, REFRESH_PROMPT)
-      ))
+      .then((state) => {
+        if (state === 'executed') return true
+        if (state === 'unmatched' || state === 'unavailable') markUnsupported()
+        return false
+      })
       .finally(() => setPending(false))
-  }, [pending, sessionId])
+  }, [pending, sessionId, markUnsupported])
 
   const sendDispatch = React.useCallback(
     (action) => {
-      if (!sessionId || !action) return Promise.resolve(false)
+      if (!sessionId || !action || !action.name) return Promise.resolve(false)
       const run = (current) => {
-        if (!current.name) return sessionPrompt(sessionId, current.text)
         const line = `/${current.name} ${JSON.stringify(current.args || {})}`
         return sessionCommand(sessionId, line).then((state) => {
           if (state === 'executed') return current.next ? run(current.next) : true
-          if (state === 'failed') return false
-          return sessionPrompt(sessionId, current.text)
+          if (state === 'unmatched' || state === 'unavailable') markUnsupported()
+          return false
         })
       }
       return run(action)
     },
-    [sessionId],
+    [sessionId, markUnsupported],
   )
 
   // Fallback-only auto-sample: when no projection payload exists at all
-  // (headless CLI or broken sampling), ask the agent once per open after a
-  // short grace so a slow first sample never triggers a pointless prompt.
+  // (headless CLI or broken sampling), force one native /git-refresh per
+  // open after a short grace so a slow first sample never triggers a
+  // pointless request.
   const autoOpenRef = React.useRef(false)
   React.useEffect(() => {
     if (!open) {
@@ -295,7 +297,8 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
               canRefresh: Boolean(sessionId),
               autoSampled,
               onRefresh: refresh,
-              onDispatch: sessionId ? sendDispatch : null,
+              onDispatch: sessionId && commandsSupported ? sendDispatch : null,
+              commandsUnsupported: Boolean(sessionId) && !commandsSupported,
             }),
           ),
           document.body,

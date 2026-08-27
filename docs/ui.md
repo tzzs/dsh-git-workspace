@@ -71,7 +71,7 @@ window.__ModuleLoader__.load({
 ```
 src/client/
 ├── index.js                  # plugin entry: { inject, apply } + slot registrations
-├── services.js               # host-context capture; session prompt bridge (real refresh)
+├── services.js               # host-context capture; session.command() bridge (native refresh/dispatch)
 ├── common.js                 # block/meta helpers shared by all cards
 ├── components.js             # design system: DSH primitives (StateDot/DisclosureRow/Tooltip/
 │                             #   icons/writeClipboard) + token-based card/row/pill atoms,
@@ -87,7 +87,7 @@ src/client/
 │   └── generic-row.js
 └── panel/                    # persistent Git Workspace explorer (composer chip)
     ├── container.js          # session-scoped "Git" chip (dirty badge + state dot)
-    │                         #   + portal-mounted right-side drawer + agent-prompt refresh
+    │                         #   + portal-mounted right-side drawer + native-command refresh
     ├── drawer.js             # reusable side drawer: backdrop, ESC close, drag-resize,
     │                         #   width persistence, slide-in animation
     └── workspace-panel.js    # collapsible sections: changes (grouped staged/unstaged/
@@ -171,27 +171,37 @@ structured error) flips `autoSampled`, and from then on the panel trusts the
 sampler — the PR tab's old "auto-ask the agent when no pull request is
 loaded" behavior stays disabled even when the branch genuinely has no PR.
 
-Prompting the agent (`binding(sessionId).session.prompt(...)` asking for a
-`git_workspace` run) remains only for:
+There is no chat/agent-turn fallback anywhere in the panel, not even as a
+degraded path. Every action — refresh included — goes through
+`session.command('/git-… {…}')` only (see [`sessionCommand`](../src/client/services.js)).
+Firing `/git-refresh {}` remains for:
 
-- fallback when native commands are unavailable (a host whose session has no
-  `command()` method), and
 - sessions where no projection payload ever arrived (headless CLI, or a host
   without the projection subsystem): opening the drawer with no data
-  auto-prompts once per open, and the PR tab still auto-prompts once per
-  repo/branch when it has no pull request data. Both fallbacks wait out a
-  short 2 s grace first, so a slow first sample never triggers a pointless
-  agent turn.
+  force-refreshes once per open, and the PR tab does the same once per
+  repo/branch when it has no pull request data yet. Both wait out a short
+  2 s grace first, so a slow first sample never triggers a pointless
+  request.
 
-The empty-state CTA uses the same prompt path.
+The empty-state CTA dispatches the same `/git-refresh {}` command.
 
-The drawer's **refresh button** goes through the native channel first:
-`/git-refresh {}` forces a fresh local sample (see `forceSample`); only when
-the command channel is unavailable does it fall back to prompting for a
-`git_workspace` turn. A dispatched write command does **not** by itself bump
-the projection until the next `turn/end` sample, so the panel pairs mutation
-commands with a following `/git-refresh` (or relies on the turn-end sampler)
-to surface the new state.
+If `session.command` is missing, or a dispatched command comes back
+unmatched (the host has no `dsh-commands` runtime, or `installGitCommands`
+never registered), the panel does **not** retry through chat — it flips to a
+disabled state: `onDispatch` becomes `null` (every write control already
+hides itself when `onDispatch` is falsy) and a banner
+("This host has no native command channel — Git write actions are
+disabled.") explains why. This is a one-way, session-scoped latch
+(`commandsSupported` in [`container.js`](../src/client/panel/container.js)) —
+once a dispatch is confirmed unmatched/unavailable it never re-attempts a
+prompt for that session.
+
+The drawer's **refresh button** always goes through `/git-refresh {}`
+(forces a fresh local sample; see `forceSample`) — never a chat fallback. A
+dispatched write command does **not** by itself bump the projection until
+the next `turn/end` sample, so the panel pairs mutation commands with a
+following `/git-refresh` (or relies on the turn-end sampler) to surface the
+new state.
 
 The local auto-sampler is throttled: before every full sample it takes a cheap
 local fingerprint (`git rev-parse HEAD` + `git status --porcelain`), skips the
@@ -226,20 +236,22 @@ snapshot without invoking any mutation. Write operations run only through the
 dedicated backend write tools (`github_pr_create`, `git_stage`, `git_unstage`,
 `git_commit`, `git_branch_create`, `git_push`, `git_checkout`, `git_merge`,
 `git_reset`, `github_pr_merge`, `github_pr_comment`, `github_pr_review`) and
-are always explicit user actions — a button press or an agent turn the user
-initiated — never fired by automatic sampling or refresh paths.
+are always explicit user actions — a button press dispatching a native
+`/git-…` command — never fired by automatic sampling or refresh paths, and
+never routed through chat.
 
 ## Write controls in the panel
 
-The panel exposes the write tools as compact controls. Controls now dispatch
-through DSH's **native slash-command channel**: the client calls
+The panel exposes the write tools as compact controls. Controls dispatch
+exclusively through DSH's **native slash-command channel**: the client calls
 `session.command('/git-… {…}')` (see [`sessionCommand`](../src/client/services.js)),
-which the host routes to a **`dsh-commands` `CommandRuntime` handler registered
-by [src/commands.ts](../src/commands.ts). The handler runs the same backend
-tools directly — no model turn, no LLM tokens, no queued prompt — while still
-going through every backend validation and blast-radius guard. The dissolved
-legacy prompt forwarder (`session.prompt(…)`) remains only as a **fallback**
-when native commands are unavailable (a host without `dsh-commands`).
+which the host routes to a **`dsh-commands` `CommandRuntime`** handler
+registered by [src/commands.ts](../src/commands.ts). The handler runs the
+same backend tools directly — no model turn, no LLM tokens, no queued
+prompt — while still going through every backend validation and blast-radius
+guard. There is no chat fallback: `session.prompt(...)` is never called from
+the panel. When native commands are unavailable, the panel disables itself
+(see "Real refresh" above) instead of degrading to a queued turn.
 
 Source Control tab:
 
@@ -302,28 +314,27 @@ Covered natively (the write paths the panel exposes):
 | — (composite) | `git-commit-push`, `git-commit-sync`, `git-sync` | stage→commit→push / commit→ff→push chains |
 | — (sync helpers) | `git-fetch`, `git-pull`, `git-fast-forward`, `git-rebase` | implemented in `src/git/syncops.ts` |
 | — (projection) | `git-refresh` | `forceSample()`; no tool equivalent |
+| `git_diff` | `git-diff` | Backs the diff viewer's "Fetch full diff" CTA for binary/oversized files; read-only |
 
-Still without a native command (read-only surface — the panel falls back to a
-queued agent prompt for these today):
+Not yet wired to a panel control (registered as a tool but no `/git-…`
+command exists for it, so there is no UI entry point at all — not a chat
+fallback, just an absent feature):
 
-| Tool | Command | Why it matters |
-| --- | --- | --- |
-| `git_workspace` | (only `/git-refresh`, which re-samples the projection) | No `git-workspace` command |
-| `git_status` · `git_files` · `git_diff` | — | Diff / status are the "Ask agent" full-diff and binary-show paths |
-| `git_commits` · `git_show` · `git_compare` · `git_blame` | — | Commit/history and blame views (the panel renders these from the sampled meta today) |
-| `git_branches` · `git_remotes` · `git_worktrees` · `git_stash` · `git_tags` | — | Branch/remote/stash/tag listings feed dropdowns that could dispatch without a turn |
-| `github_pr` · `github_pr_diff` · `github_pr_reviews` · `github_pr_comments` | — | PR detail + full diff are the "Ask agent" paths the panel still forwards |
-| `github_ci` · `github_ci_logs` · `github_issue` · `github_issue_comments` · `github_releases` | — | Read-only PR/CI/issue/release fetches with no panel control yet |
+| Tool | Why it matters |
+| --- | --- |
+| `git_workspace` | Only reachable via `/git-refresh`, which re-samples the projection; no direct `git-workspace` command |
+| `git_status` · `git_files` | No panel control calls these directly today |
+| `git_commits` · `git_show` · `git_compare` · `git_blame` | Commit/history and blame views (the panel renders these from the sampled meta today) |
+| `git_branches` · `git_remotes` · `git_worktrees` · `git_stash` · `git_tags` | Branch/remote/stash/tag listings feed dropdowns that could dispatch without a turn |
+| `github_pr` · `github_pr_diff` · `github_pr_reviews` · `github_pr_comments` | PR detail + full diff views |
+| `github_ci` · `github_ci_logs` · `github_issue` · `github_issue_comments` · `github_releases` | Read-only PR/CI/issue/release fetches with no panel control yet |
 
-So the architecture already removes the DSH conversation for every mutation
-the panel offers today — staging, commit, push, branch ops, merge, discard,
-PR create/merge/comment/review, and the sync helpers all dispatch through
-`session.command()` with no agent turn. The remaining dialog paths are the
-read-only fetches above, plus the empty-session fallback (no `command()`
-method on the runtime / broken sampling). Migrating those is pure ergonomics —
-wrapping a read-only tool in `toolCommand` in `src/commands.ts` and letting
-the panel call `/git-status`, `/git-diff`, `/git-pr` etc. closes them with
-zero new write surface.
+The panel has **zero chat/agent-turn entry points** — every control either
+dispatches a native `/git-…` command or does nothing (hidden or disabled
+when `onDispatch` is `null`). The tools in the second table simply have no
+UI surface yet; extending coverage is wrapping the read-only tool in
+`toolCommand` in `src/commands.ts` and adding a panel control that calls
+`/git-status`, `/git-pr`, etc. — never a queued prompt.
 
 ## Building the client
 

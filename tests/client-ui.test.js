@@ -372,14 +372,18 @@ test('Git Workspace panel tolerates a git_status meta without a changes summary'
   assert.equal(drawer.props.subtitle.includes('discus'), true, 'falls back to git_status meta')
 })
 
-function sessionMock({ failCommand = false, noCommand = false } = {}) {
+function sessionMock({ failCommand = false, noCommand = false, unmatched = false } = {}) {
   const recordedCommands = []
   const recordedPrompts = []
   const session = {
     ...(noCommand ? {} : {
       command(line) {
         recordedCommands.push(line)
-        return Promise.resolve(failCommand ? { ok: false } : { ok: true, value: { matched: true } })
+        return Promise.resolve(
+          failCommand
+            ? { ok: false }
+            : { ok: true, value: { matched: !unmatched } },
+        )
       },
     }),
     prompt(content) {
@@ -414,7 +418,7 @@ test('refresh uses the native command channel without an agent turn', async () =
   assert.deepEqual(mock.prompts, [])
 })
 
-test('refresh falls back to a read-only prompt only when native commands are unavailable', async () => {
+test('refresh never falls back to chat when native commands are unavailable', async () => {
   const mock = sessionMock({ noCommand: true })
   const tree = renderHeader({ nodes: [] }, {
     open: true,
@@ -427,7 +431,7 @@ test('refresh falls back to a read-only prompt only when native commands are una
   })
   await tree.children[1].el.props.actions.props.onClick()
   assert.equal(mock.commands.length, 0)
-  assert.deepEqual(mock.prompts, ['Run the git_workspace tool now and report the refreshed workspace summary.'])
+  assert.deepEqual(mock.prompts, [], 'no chat fallback — the refresh silently no-ops')
 })
 
 test('refresh is inert when the sessions service is unavailable', async () => {
@@ -804,7 +808,7 @@ test('clicking a file row expands its inline diff and collapses again', () => {
   )
 })
 
-test('rows without patch data stay inert; omitted diffs offer the agent CTA', async () => {
+test('rows without patch data stay inert; omitted diffs offer a native diff CTA', async () => {
   const mock = sessionMock()
 
   const ui = interactiveHeader(DIFF_CONVERSATION, {
@@ -825,14 +829,12 @@ test('rows without patch data stay inert; omitted diffs offer the agent CTA', as
   assert.ok(binRow, 'omitted-diff row is interactive')
   binRow.props.onClick()
   ;({ body } = ui.render())
-  const askBtns = ui.findEls(body, (el) => ((el.type && el.type.stubName === 'Button') || el.type === 'button') && ownText(el).includes('Ask agent'))
-  assert.equal(askBtns.length, 1, 'the opened binary omission shows one ask-agent CTA')
-  const askBtn = askBtns.find((el) => ownText(el) === 'Ask agent')
-  assert.ok(askBtn, 'binary omission shows the concise ask-agent CTA')
+  const askBtns = ui.findEls(body, (el) => ((el.type && el.type.stubName === 'Button') || el.type === 'button') && ownText(el).includes('Fetch full diff'))
+  assert.equal(askBtns.length, 1, 'the opened binary omission shows one fetch-full-diff CTA')
+  const askBtn = askBtns[0]
   await askBtn.props.onClick()
-  assert.equal(mock.commands.length, 0, 'ask-full bypasses the command channel')
-  assert.match(String(mock.prompts[0]), /git_diff/)
-  assert.match(String(mock.prompts[0]), /huge\.bin/)
+  assert.deepEqual(mock.commands, ['/git-diff {"path":"huge.bin"}'], 'the CTA dispatches the native git-diff command')
+  assert.deepEqual(mock.prompts, [], 'no chat fallback for the full-diff fetch')
 })
 
 test('stage-all dispatches its native write command and does not prompt', async () => {
@@ -851,6 +853,31 @@ test('stage-all dispatches its native write command and does not prompt', async 
   await stageAll.props.onClick()
   assert.deepEqual(mock.commands, ['/git-stage {"all":true}'])
   assert.deepEqual(mock.prompts, [])
+})
+
+test('an unmatched native command disables the whole panel with an explicit hint, never chat', async () => {
+  const mock = sessionMock({ unmatched: true })
+  const ui = interactiveHeader(DIFF_CONVERSATION, {
+    ctxExtras: {
+      get(name) {
+        if (name !== 'sessions') return undefined
+        return { binding: () => ({ session: mock.session }) }
+      },
+    },
+  })
+  let { body } = ui.render()
+  const stageAll = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Stage all')[0]
+  assert.ok(stageAll, 'Stage all button renders before the host is known to lack native commands')
+  await stageAll.props.onClick()
+  ;({ body } = ui.render())
+  const hint = ui.findEls(body, (el) => el.type === 'span' && ownText(el).includes('no native command channel'))
+  assert.ok(hint.length > 0, 'panel shows an explicit unsupported-commands hint')
+  assert.equal(
+    ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Stage all').length,
+    0,
+    'write controls disappear once native commands are known unsupported',
+  )
+  assert.deepEqual(mock.prompts, [], 'no chat fallback is ever used, even once native support is ruled out')
 })
 
 test('a failed native command never falls back to another queued turn', async () => {

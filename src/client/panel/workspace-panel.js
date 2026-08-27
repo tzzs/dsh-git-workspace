@@ -26,9 +26,10 @@ import {
 } from '../components.js'
 import { DiffViewer } from './diff-viewer.js'
 
-const REFRESH_HINT = 'Ask the agent to run git_workspace to populate the workspace.'
+const REFRESH_HINT = 'No workspace session available yet.'
 
-const PROMPT_SUFFIX = '\n\nAfterwards, run the git_workspace tool to refresh the workspace panel.'
+const COMMANDS_UNSUPPORTED_HINT =
+  'This host has no native command channel — Git write actions are disabled.'
 
 const STATUS_LETTER = {
   modified: { text: 'M', color: 'var(--dsw-alias-state-warn-primary)' },
@@ -167,8 +168,8 @@ function fileStageControl(file, onDispatch) {
   if (!onDispatch) return null
   const staged = file.staged === true
   const action = staged
-    ? {name: 'git-unstage', args: {paths: [file.path]}, text: `Use the git_unstage tool to unstage ${JSON.stringify(file.path)}.${PROMPT_SUFFIX}`}
-    : {name: 'git-stage', args: {paths: [file.path]}, text: `Use the git_stage tool to stage ${JSON.stringify(file.path)}.${PROMPT_SUFFIX}`}
+    ? {name: 'git-unstage', args: {paths: [file.path]}}
+    : {name: 'git-stage', args: {paths: [file.path]}}
   return React.createElement(
     'span',
     { onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
@@ -265,7 +266,7 @@ function FileTreeRow({ file, depth, onDispatch }) {
             {
               file,
               onClose: () => setOpen(false),
-              onAskFull: (text) => onDispatch({text}),
+              onAskFull: onDispatch ? () => onDispatch({name: 'git-diff', args: {path: file.path}}) : null,
             },
           ),
         )
@@ -378,37 +379,35 @@ function actionCommand(action, message, data, branch) {
   const title = firstCommit || `Merge ${head || 'branch'} into ${base}`
   const body = `${data.repository && data.repository.name ? `Pull request for \`${data.repository.name}\`.\n\n` : ''}Created from the Git Workspace panel.`
   switch (action) {
-    case 'stage-all': return {name: 'git-stage', args: {all: true}, text: actionPrompt(action, message, data, branch)}
-    case 'unstage-all': return {name: 'git-unstage', args: {all: true}, text: actionPrompt(action, message, data, branch)}
-    case 'commit': return {name: 'git-commit', args: {message}, text: actionPrompt(action, message, data, branch)}
-    case 'commit-push': return {name: 'git-commit-push', args: {message}, text: actionPrompt(action, message, data, branch)}
+    case 'stage-all': return {name: 'git-stage', args: {all: true}}
+    case 'unstage-all': return {name: 'git-unstage', args: {all: true}}
+    case 'commit': return {name: 'git-commit', args: {message}}
+    case 'commit-push': return {name: 'git-commit-push', args: {message}}
     case 'commit-sync':
       return {
         name: 'git-commit-sync',
         args: {message},
-        next: {text: 'Run the git_workspace tool now and report the refreshed workspace summary.'},
-        text: actionPrompt(action, message, data, branch),
+        next: {name: 'git-refresh', args: {}},
       }
-    case 'push': return {name: 'git-push', args: {}, text: actionPrompt(action, message, data, branch)}
-    case 'force-push': return {name: 'git-push', args: {force: true}, text: actionPrompt(action, message, data, branch)}
-    case 'new-branch': return {name: 'git-branch-create', args: {name: branch}, text: actionPrompt(action, message, data, branch)}
-    case 'switch-branch': return {name: 'git-checkout', args: {branch}, text: actionPrompt(action, message, data, branch)}
-    case 'merge-branch': return {name: 'git-merge', args: {branch}, text: actionPrompt(action, message, data, branch)}
+    case 'push': return {name: 'git-push', args: {}}
+    case 'force-push': return {name: 'git-push', args: {force: true}}
+    case 'new-branch': return {name: 'git-branch-create', args: {name: branch}}
+    case 'switch-branch': return {name: 'git-checkout', args: {branch}}
+    case 'merge-branch': return {name: 'git-merge', args: {branch}}
     case 'create-pr':
       return {
         name: 'git-pr-create',
         args: {base, ...(head ? {head} : {}), title, body},
-        text: createPrPrompt(data),
       }
-    case 'push-before-pr': return {name: 'git-push', args: {}, text: actionPrompt(action, message, data, branch)}
-    case 'pull': return {name: 'git-pull', args: {}, text: actionPrompt(action, message, data, branch)}
-    case 'fast-forward': return {name: 'git-fast-forward', args: {}, text: actionPrompt(action, message, data, branch)}
-    case 'sync': return {name: 'git-sync', args: {}, text: actionPrompt(action, message, data, branch)}
-    case 'rebase': return {name: 'git-rebase', args: {}, text: actionPrompt(action, message, data, branch)}
-    case 'fetch': return {name: 'git-fetch', args: {}, text: actionPrompt(action, message, data, branch)}
-    case 'publish': return {name: 'git-push', args: {}, text: actionPrompt(action, message, data, branch)}
-    case 'discard': return {name: 'git-discard', args: {confirm: true}, text: actionPrompt(action, message, data, branch)}
-    default: return {text: actionPrompt(action, message, data, branch)}
+    case 'push-before-pr': return {name: 'git-push', args: {}}
+    case 'pull': return {name: 'git-pull', args: {}}
+    case 'fast-forward': return {name: 'git-fast-forward', args: {}}
+    case 'sync': return {name: 'git-sync', args: {}}
+    case 'rebase': return {name: 'git-rebase', args: {}}
+    case 'fetch': return {name: 'git-fetch', args: {}}
+    case 'publish': return {name: 'git-push', args: {}}
+    case 'discard': return {name: 'git-discard', args: {confirm: true}}
+    default: return null
   }
 }
 
@@ -424,32 +423,6 @@ const GIT_ACTIONS = [
 ]
 
 const BRANCH_ACTION_VERBS = { 'new-branch': 'Create', 'switch-branch': 'Switch', 'merge-branch': 'Merge' }
-
-function actionPrompt(action, message, data, branch) {
-  const upstream = data.branch && data.branch.upstream ? data.branch.upstream : 'the upstream branch'
-  const msg = JSON.stringify(message || '')
-  const name = JSON.stringify(branch || '<name>')
-  const stageThen = (rest) => `Use the git_stage tool with paths omitted to stage everything (all:true),${rest}`
-  const prompts = {
-    'stage-all': 'Use the git_stage tool with paths omitted to stage everything (all:true).',
-    'unstage-all': 'Use the git_unstage tool with paths omitted to unstage everything (all:true).',
-    commit: stageThen(` then use the git_commit tool with message ${msg}.`),
-    'commit-push': stageThen(` then use the git_commit tool with message ${msg}, then use the git_push tool.`),
-    'commit-sync': stageThen(` then use the git_commit tool with message ${msg}, then use the git_push tool to update ${upstream}.`),
-    push: 'Use the git_push tool.',
-    'force-push': 'Use the git_push tool with force-with-lease semantics.',
-    'new-branch': `Use the git_branch_create tool with name ${name}.`,
-    'switch-branch': `Use the git_checkout tool with branch ${name}.`,
-    'merge-branch': `Use the git_merge tool with branch ${name}.`,
-    'create-pr': 'Run the github_pr_create tool for the current branch (it fills title/body from commit history).',
-    'push-before-pr': 'Use the git_push tool to push the current branch before creating its pull request.',
-    pull: 'Pull from the configured upstream branch.', 'fast-forward': `Fast-forward from ${upstream}.`,
-    sync: `Sync the current branch with ${upstream}.`, rebase: `Rebase from ${upstream}.`,
-    fetch: 'Fetch all configured remotes.', publish: 'Publish the current branch to its remote.',
-    discard: 'Use the git_reset tool to discard changes. Hard mode requires confirm:true and is destructive.',
-  }
-  return `${prompts[action] || 'Run the selected Git operation.'}${PROMPT_SUFFIX}`
-}
 
 function CommitBox({ onDispatch, data }) {
   const [msg, setMsg] = React.useState('')
@@ -828,12 +801,6 @@ function MergeReviewControls({ pr, state, onDispatch }) {
       state: reviewState,
       ...(reviewState === 'REQUEST_CHANGES' ? {body: 'Please address the requested changes.'} : {}),
     },
-    text:
-      `Use the github_pr_review tool with number ${pr.number} and state "${reviewState}"` +
-      (reviewState === 'REQUEST_CHANGES'
-        ? ' (a review comment body is required - describe the requested changes).'
-        : '.') +
-      PROMPT_SUFFIX,
   })
   const mergeLabel =
     method === 'merge' ? 'Merge' : method === 'squash' ? 'Squash and merge' : 'Rebase and merge'
@@ -888,8 +855,7 @@ function MergeReviewControls({ pr, state, onDispatch }) {
             act({
               name: 'git-pr-merge',
               args: {number: pr.number, method, ...(delBranch ? {deleteBranch: true} : {})},
-              next: {text: 'Run the git_workspace tool now and report the refreshed workspace summary.'},
-              text: `Use the github_pr_merge tool with number ${pr.number} and method "${method}"${delBranch ? ' and deleteBranch:true' : ''}.${PROMPT_SUFFIX}`,
+              next: {name: 'git-refresh', args: {}},
             }),
         },
         React.createElement(IconBranchOutline16, { size: 14 }),
@@ -919,8 +885,7 @@ function CommentComposer({ pr, disabled, onDispatch }) {
       onDispatch({
         name: 'git-pr-comment',
         args: {number: pr.number, body},
-        next: {text: 'Run the git_workspace tool now and report the refreshed workspace summary.'},
-        text: `Use the github_pr_comment tool with number ${pr.number} and body ${JSON.stringify(body)}.${PROMPT_SUFFIX}`,
+        next: {name: 'git-refresh', args: {}},
       }),
     ).finally(() => {
       setBusy(false)
@@ -951,31 +916,6 @@ function CommentComposer({ pr, disabled, onDispatch }) {
       React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: disabled || busy || !text.trim(), onClick: submit, title: 'Post this comment', style: { width: 'auto', padding: '0 14px', flex: 'none' } }, busy ? 'Working…' : 'Comment'),
     ),
   )
-}
-
-function createPrPrompt(data) {
-  const branch = data.branch && data.branch.name
-  const base = (data.comparison && data.comparison.base) || 'main'
-  const repo = data.repository && data.repository.name
-  const firstCommit =
-    Array.isArray(data.commits && data.commits.recent) && data.commits.recent.length > 0
-      ? String(data.commits.recent[0].message || '').split('\n')[0].trim()
-      : ''
-  const title = JSON.stringify(firstCommit || `Merge ${branch || 'branch'} into ${base}`)
-  const lines = []
-  if (!data.branch || !data.branch.upstream) {
-    lines.push(
-      `First publish the branch: run \`git push -u origin ${branch || '<branch>'}\`.`,
-    )
-  }
-  let args = `base: ${JSON.stringify(base)}`
-  if (branch) args += `, head: ${JSON.stringify(branch)}`
-  args += `, title: ${title}, body: ${JSON.stringify(
-    (repo ? `Pull request for \`${repo}\`.\n\n` : '') + 'Created from the Git Workspace panel.',
-  )}`
-  lines.push(`Then run the github_pr_create tool with arguments: ${args}.`)
-  lines.push('Afterwards, run the git_workspace tool to refresh the workspace panel.')
-  return lines.join('\n')
 }
 
 function PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSampled }) {
@@ -1165,12 +1105,13 @@ function TabBar({ tab, setTab, prHint }) {
   )
 }
 
-export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRefresh, autoSampled, onRefresh, onDispatch }) {
+export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRefresh, autoSampled, onRefresh, onDispatch, commandsUnsupported }) {
   const [tab, setTab] = React.useState('sc')
 
-  // Fallback-only: when no projection payload exists at all, the PR tab asks
-  // the agent once per repo/branch after a short grace. Once local sampling
-  // is proven alive (autoSampled), pullRequest/ci arrive on their own.
+  // Fallback-only: when no projection payload exists at all, the PR tab
+  // forces one native /git-refresh per repo/branch after a short grace.
+  // Once local sampling is proven alive (autoSampled), pullRequest/ci
+  // arrive on their own.
   const prAutoRef = React.useRef(null)
   React.useEffect(() => {
     if (autoSampled || tab !== 'pr' || !data || data.pullRequest) return
@@ -1212,6 +1153,14 @@ export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRef
     body = React.createElement(
       React.Fragment,
       null,
+      commandsUnsupported
+        ? React.createElement(
+            Row,
+            { style: { padding: '6px 8px', marginBottom: '8px', flex: 'none', borderRadius: '6px', background: 'var(--dsw-alias-state-warn-secondary, transparent)', border: '1px solid var(--dsw-alias-border-l1)' } },
+            React.createElement(IconWarningOutline16, { size: 14 }),
+            React.createElement(Muted, null, COMMANDS_UNSUPPORTED_HINT),
+          )
+        : null,
       React.createElement(TabBar, { tab, setTab, prHint: data.pullRequest ? (prUnresolved || null) : null }),
       tab === 'pr' ? PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSampled }) : ScTab({ data, refreshing, onDispatch, onOpenPr: () => setTab('pr') }),
     )

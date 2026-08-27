@@ -137,9 +137,12 @@ review buttons, and a comment composer. Every control dispatches a native
 `/git-…` command through `session.command()` (registered in
 `src/commands.ts`), and each command wraps the exact `git_*`/`github_*` write
 tool and JSON arguments — no shell splicing, no agent turn, and no sampler /
-auto-refresh path that can fire a write. Read-only fetches (**status / diff /
-show / PR, CI, issue, release views**) still fall back to a queued agent
-prompt until they get native commands; the mutation surface has none. See
+auto-refresh path that can fire a write. There is no chat fallback anywhere
+in the panel: when native commands are unavailable, the panel disables
+itself with an explicit banner instead of ever queuing a prompt. Some
+read-only fetches (**status, show, PR/CI/issue/release detail views**) have
+no panel control yet at all — not a chat fallback, just an absent feature —
+while `git_diff` already ships as a native `/git-diff` command. See
 [docs/ui.md](docs/ui.md) for details.
 
 ### Installation

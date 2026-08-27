@@ -209,6 +209,8 @@ export async function installGitCommands(ctx: Pick<Context, 'inject'>): Promise<
       return success(`refreshed: ${dir}`)
     })
 
+    toolCommand<DiffOptions>(gitDiff, 'git-diff', 'Read-only command. Show the diff for a path (or all changes) with bounded hunks.', formatDiff)
+
     toolCommand<StageOptions>(gitStage, 'git-stage', 'Write command. Stage all changes or selected paths in the repository working tree/index.')
     toolCommand<UnstageOptions>(gitUnstage, 'git-unstage', 'Write command. Unstage all changes or selected paths; does not discard work-tree edits.')
     toolCommand<CommitOptions>(gitCommit, 'git-commit', 'Write command. Create a commit from already-staged changes.')

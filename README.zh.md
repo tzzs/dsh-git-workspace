@@ -134,8 +134,10 @@ Unstage All、提交框（commit、push、分支操作）、PR 合并控件（�
 每个控件都通过 `session.command()` 派发原生的 `/git-…` 命令（注册于
 `src/commands.ts`），每条命令封装对应的 `git_*`/`github_*` 写 Tool 与 JSON 参数
 ——不拼接 shell、不经过 Agent 回合，且没有任何采样/自动刷新路径能触发写操作。
-只读查询（**status / diff / show / PR、CI、issue、release 视图**）在补齐原生命令
-之前仍会回退到排队的 Agent 提示词；变更操作则完全没有这类回退。详见
+面板里没有任何走对话的兜底路径：一旦原生命令不可用，面板会直接禁用自身并给出
+明确提示，而不会退回到排队的 Agent 提示词。部分只读查询（**status、show、
+PR/CI/issue/release 详情视图**）目前还没有对应的面板入口——这只是功能尚未补齐，
+不是对话兜底；`git_diff` 已经是原生 `/git-diff` 命令。详见
 [docs/ui.md](docs/ui.md)。
 
 ### 安装
