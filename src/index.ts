@@ -62,6 +62,7 @@ import {
   errorTitle,
 } from './presentation.js'
 import { installWorkspaceSampler } from './projection.js'
+import { installGitCommands } from './commands.js'
 
 export const name = '@tzzs/dsh-git-workspace'
 export const inject = ['tools']
@@ -157,6 +158,7 @@ export function apply(ctx: {
   tools: { register(tool: unknown): unknown }
 } & Pick<Context, 'inject'>) {
   installWorkspaceSampler(ctx)
+  installGitCommands(ctx)
   // ---- git_workspace -----------------------------------------------------
   register(ctx, {
     name: 'git_workspace',

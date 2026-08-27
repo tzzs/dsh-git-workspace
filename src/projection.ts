@@ -11,7 +11,7 @@ export const WORKSPACE_PROJECTION_KEY = 'tzzs.git-workspace'
 
 export type WorkspaceSample = WorkspaceMeta | { error: unknown }
 
-declare module '@deepseek-ai/dsh-session' {
+declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     'tzzs.git-workspace/sample': WorkspaceSample
   }
@@ -69,14 +69,16 @@ async function localFingerprint(cwd: string): Promise<string | null> {
   }
 }
 
-async function runSample(session: Session): Promise<void> {
+async function runSample(session: Session, force = false): Promise<void> {
   try {
     const cwd = session.header?.cwd
     if (!cwd || session.header?.origin === 'subagent') return
     const local = await localFingerprint(cwd)
     const key = local ?? ''
-    const prev = lastSamples.get(session)
-    if (prev && prev.local === key && Date.now() - prev.at < REMOTE_TTL_MS) return
+    if (!force) {
+      const prev = lastSamples.get(session)
+      if (prev && prev.local === key && Date.now() - prev.at < REMOTE_TTL_MS) return
+    }
     const result = await gitWorkspace(cwd)
     const payload: WorkspaceSample =
       'error' in result
@@ -92,7 +94,7 @@ async function runSample(session: Session): Promise<void> {
           })
     lastSamples.set(session, { local: key, at: Date.now() })
     const fingerprint = JSON.stringify(payload)
-    if (lastFingerprints.get(session) === fingerprint) return
+    if (!force && lastFingerprints.get(session) === fingerprint) return
     lastFingerprints.set(session, fingerprint)
     session.append(WORKSPACE_EVENT, payload)
   } catch {
@@ -100,14 +102,18 @@ async function runSample(session: Session): Promise<void> {
   }
 }
 
-function sampleSession(session: Session): Promise<void> {
+function sampleSession(session: Session, force = false): Promise<void> {
   const running = inFlight.get(session)
-  if (running) return running
-  const task = runSample(session).finally(() => {
+  if (running && !force) return running
+  const task = runSample(session, force).finally(() => {
     if (inFlight.get(session) === task) inFlight.delete(session)
   })
   inFlight.set(session, task)
   return task
+}
+
+export async function forceSample(session: Session): Promise<void> {
+  await sampleSession(session, true)
 }
 
 export function installWorkspaceSampler(ctx: SamplerHost): void {

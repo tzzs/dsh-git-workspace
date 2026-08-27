@@ -131,9 +131,12 @@ UI 与后端同步演进。它依旧支持 inspect、search、diff、browse、op
 现在还提供接入新写 Tool 的操作控件：逐文件 Stage/Unstage 按钮、Stage All /
 Unstage All、提交框（commit、push、分支操作）、PR 合并控件（合并方式选择 +
 删除源分支勾选框）、Approve / Request changes 审阅按钮，以及评论输入框。
-UI 无法直接调用 Tool——每个控件只会发出一条排队的 Agent 回合，其文本明确指定
-要运行的 `git_*`/`github_*` 写 Tool 与参数，因此任何变更都必须经过用户发起的
-模型可见回合。自动采样与刷新路径绝不触发写操作。详见 [docs/ui.md](docs/ui.md)。
+每个控件都通过 `session.command()` 派发原生的 `/git-…` 命令（注册于
+`src/commands.ts`），每条命令封装对应的 `git_*`/`github_*` 写 Tool 与 JSON 参数
+——不拼接 shell、不经过 Agent 回合，且没有任何采样/自动刷新路径能触发写操作。
+只读查询（**status / diff / show / PR、CI、issue、release 视图**）在补齐原生命令
+之前仍会回退到排队的 Agent 提示词；变更操作则完全没有这类回退。详见
+[docs/ui.md](docs/ui.md)。
 
 ### 安装
 

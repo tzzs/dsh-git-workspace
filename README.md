@@ -133,11 +133,14 @@ browses, opens, and refreshes, and now also surfaces write controls that are
 wired to the new write tools: per-file Stage/Unstage buttons, Stage All /
 Unstage All, a commit box (commit, push, branch actions), a PR merge control
 with merge-method choice and delete-branch checkbox, Approve / Request-changes
-review buttons, and a comment composer. The UI cannot call tools directly —
-every control emits one queued agent turn whose text names the exact
-`git_*`/`github_*` write tool and arguments, so nothing mutates without a
-model-visible turn the user initiated. Automatic sampling and refresh paths
-never fire writes. See [docs/ui.md](docs/ui.md) for details.
+review buttons, and a comment composer. Every control dispatches a native
+`/git-…` command through `session.command()` (registered in
+`src/commands.ts`), and each command wraps the exact `git_*`/`github_*` write
+tool and JSON arguments — no shell splicing, no agent turn, and no sampler /
+auto-refresh path that can fire a write. Read-only fetches (**status / diff /
+show / PR, CI, issue, release views**) still fall back to a queued agent
+prompt until they get native commands; the mutation surface has none. See
+[docs/ui.md](docs/ui.md) for details.
 
 ### Installation
 

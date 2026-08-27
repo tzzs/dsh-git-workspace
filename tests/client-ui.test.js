@@ -372,37 +372,62 @@ test('Git Workspace panel tolerates a git_status meta without a changes summary'
   assert.equal(drawer.props.subtitle.includes('discus'), true, 'falls back to git_status meta')
 })
 
-test('refresh action prompts the agent through the sessions service', async () => {
-  const prompts = []
+function sessionMock({ failCommand = false, noCommand = false } = {}) {
+  const recordedCommands = []
+  const recordedPrompts = []
+  const session = {
+    ...(noCommand ? {} : {
+      command(line) {
+        recordedCommands.push(line)
+        return Promise.resolve(failCommand ? { ok: false } : { ok: true, value: { matched: true } })
+      },
+    }),
+    prompt(content) {
+      recordedPrompts.push(content[0].text)
+      return Promise.resolve({ ok: true })
+    },
+  }
+  return {
+    session,
+    commands: recordedCommands,
+    prompts: recordedPrompts,
+  }
+}
+
+test('refresh uses the native command channel without an agent turn', async () => {
+  const mock = sessionMock()
   const tree = renderHeader({ nodes: [] }, {
     open: true,
     ctxExtras: {
       get(name) {
         if (name !== 'sessions') return undefined
-        return {
-          binding(id) {
-            return {
-              session: {
-                prompt(content) {
-                  prompts.push({ id, text: content[0].text })
-                  return Promise.resolve({ ok: true })
-                },
-              },
-            }
-          },
-        }
+        return { binding: () => ({ session: mock.session }) }
       },
     },
   })
   const drawer = tree.children[1].el
   const refreshEl = drawer.props.actions
   assert.equal(typeof refreshEl.props.onClick, 'function', 'drawer exposes a refresh action')
-  assert.equal(prompts.length, 0, 'no prompt fired on render')
+  assert.equal(mock.commands.length, 0, 'no command fired on render')
   await refreshEl.props.onClick()
-  assert.deepEqual(
-    prompts,
-    [{ id: 's1', text: 'Run the git_workspace tool now and report the refreshed workspace summary.' }],
-  )
+  assert.deepEqual(mock.commands, ['/git-refresh {}'])
+  assert.deepEqual(mock.prompts, [])
+})
+
+test('refresh falls back to a read-only prompt only when native commands are unavailable', async () => {
+  const mock = sessionMock({ noCommand: true })
+  const tree = renderHeader({ nodes: [] }, {
+    open: true,
+    ctxExtras: {
+      get(name) {
+        if (name !== 'sessions') return undefined
+        return { binding: () => ({ session: mock.session }) }
+      },
+    },
+  })
+  await tree.children[1].el.props.actions.props.onClick()
+  assert.equal(mock.commands.length, 0)
+  assert.deepEqual(mock.prompts, ['Run the git_workspace tool now and report the refreshed workspace summary.'])
 })
 
 test('refresh is inert when the sessions service is unavailable', async () => {
@@ -780,23 +805,13 @@ test('clicking a file row expands its inline diff and collapses again', () => {
 })
 
 test('rows without patch data stay inert; omitted diffs offer the agent CTA', async () => {
-  const prompts = []
+  const mock = sessionMock()
+
   const ui = interactiveHeader(DIFF_CONVERSATION, {
     ctxExtras: {
       get(name) {
         if (name !== 'sessions') return undefined
-        return {
-          binding(id) {
-            return {
-              session: {
-                prompt(content) {
-                  prompts.push({ id, text: content[0].text })
-                  return Promise.resolve({ ok: true })
-                },
-              },
-            }
-          },
-        }
+        return { binding: () => ({ session: mock.session }) }
       },
     },
   })
@@ -811,11 +826,48 @@ test('rows without patch data stay inert; omitted diffs offer the agent CTA', as
   binRow.props.onClick()
   ;({ body } = ui.render())
   const askBtns = ui.findEls(body, (el) => ((el.type && el.type.stubName === 'Button') || el.type === 'button') && ownText(el).includes('Ask agent'))
-  assert.equal(askBtns.length, 1, 'binary omission shows an ask-agent CTA')
-  await askBtns[0].props.onClick()
-  assert.equal(prompts.length, 1)
-  assert.match(prompts[0].text, /git_diff/)
-  assert.match(prompts[0].text, /huge\.bin/)
+  assert.equal(askBtns.length, 1, 'the opened binary omission shows one ask-agent CTA')
+  const askBtn = askBtns.find((el) => ownText(el) === 'Ask agent')
+  assert.ok(askBtn, 'binary omission shows the concise ask-agent CTA')
+  await askBtn.props.onClick()
+  assert.equal(mock.commands.length, 0, 'ask-full bypasses the command channel')
+  assert.match(String(mock.prompts[0]), /git_diff/)
+  assert.match(String(mock.prompts[0]), /huge\.bin/)
+})
+
+test('stage-all dispatches its native write command and does not prompt', async () => {
+  const mock = sessionMock()
+  const ui = interactiveHeader(DIFF_CONVERSATION, {
+    ctxExtras: {
+      get(name) {
+        if (name !== 'sessions') return undefined
+        return { binding: () => ({ session: mock.session }) }
+      },
+    },
+  })
+  let { body } = ui.render()
+  const stageAll = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Stage all')[0]
+  assert.ok(stageAll, 'Stage all button renders')
+  await stageAll.props.onClick()
+  assert.deepEqual(mock.commands, ['/git-stage {"all":true}'])
+  assert.deepEqual(mock.prompts, [])
+})
+
+test('a failed native command never falls back to another queued turn', async () => {
+  const mock = sessionMock({ failCommand: true })
+  const ui = interactiveHeader(DIFF_CONVERSATION, {
+    ctxExtras: {
+      get(name) {
+        if (name !== 'sessions') return undefined
+        return { binding: () => ({ session: mock.session }) }
+      },
+    },
+  })
+  let { body } = ui.render()
+  const stageAll = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Stage all')[0]
+  await stageAll.props.onClick()
+  assert.equal(mock.commands.length, 1)
+  assert.deepEqual(mock.prompts, [])
 })
 
 test('sidebar open state persists and a global hotkey toggles it', () => {
@@ -919,7 +971,7 @@ test('drawer docks on wide viewports and falls back to overlay when narrow', () 
   }
 })
 
-test('Create PR empty state prompts the github_pr_create tool with explicit args', () => {
+test('Create PR empty state dispatches the native github PR command with explicit args', async () => {
   const conversation = {
     nodes: [
       {
@@ -941,40 +993,28 @@ test('Create PR empty state prompts the github_pr_create tool with explicit args
       },
     ],
   }
-  const prompts = []
+  const mock = sessionMock()
   const ui = interactiveHeader(conversation, {
     ctxExtras: {
       get(name) {
         if (name !== 'sessions') return undefined
-        return {
-          binding(id) {
-            return {
-              session: {
-                prompt(content) {
-                  prompts.push({ id, text: content[0].text })
-                  return Promise.resolve({ ok: true })
-                },
-              },
-            }
-          },
-        }
+        return { binding: () => ({ session: mock.session }) }
       },
     },
   })
   let { body } = ui.render()
-  // Switch to the Pull Request tab (the panel defaults to Source Control).
   const prTabBtn = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Pull Request'))[0]
   assert.ok(prTabBtn, 'PR tab button renders')
   prTabBtn.props.onClick()
   ;({ body } = ui.render())
   const createBtns = ui.findEls(body, (el) => el.type === 'button' && String(el.props.className || '').includes('dgw-createpr'))
   assert.equal(createBtns.length, 1, 'Create PR button renders in the empty PR tab')
-  createBtns[0].props.onClick()
-  assert.equal(prompts.length, 1)
-  const text = prompts[0].text
-  assert.match(text, /github_pr_create/, 'prompt names the dedicated tool')
-  assert.match(text, /"feature\/x"/, 'prompt carries the head branch')
-  assert.match(text, /"main"/, 'prompt carries the base branch')
-  assert.match(text, /git_workspace/, 'prompt asks for a refresh afterwards')
-  assert.doesNotMatch(text, /git push/, 'no raw push instruction when an upstream exists')
+  await createBtns[0].props.onClick()
+  assert.equal(mock.commands.length, 1, 'create PR dispatches one native command; projection sampling refreshes automatically')
+  const createLine = mock.commands.find((line) => typeof line === "string" && line.startsWith("/git-pr-create "))
+  const create = JSON.parse(createLine.slice("/git-pr-create ".length))
+  assert.equal(create.head, 'feature/x')
+  assert.equal(create.base, 'main')
+  assert.equal(create.title, 'feat: do things')
+  assert.deepEqual(mock.prompts, [])
 })

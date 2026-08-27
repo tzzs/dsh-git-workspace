@@ -8,7 +8,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { GitWorkspacePanel } from './workspace-panel.js'
 import { Drawer } from './drawer.js'
-import { sessionPrompt } from '../services.js'
+import { sessionCommand, sessionPrompt } from '../services.js'
 import {
   Dot,
   IconBtn,
@@ -174,11 +174,31 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
   const refresh = React.useCallback(() => {
     if (pending || !sessionId) return Promise.resolve(false)
     setPending(true)
-    return sessionPrompt(sessionId, REFRESH_PROMPT).finally(() => setPending(false))
+    return sessionCommand(sessionId, '/git-refresh {}')
+      .then((state) => (
+        state === 'executed'
+          ? true
+          : state === 'failed'
+            ? false
+            : sessionPrompt(sessionId, REFRESH_PROMPT)
+      ))
+      .finally(() => setPending(false))
   }, [pending, sessionId])
 
-  const sendPrompt = React.useCallback(
-    (text) => (sessionId ? sessionPrompt(sessionId, text) : Promise.resolve(false)),
+  const sendDispatch = React.useCallback(
+    (action) => {
+      if (!sessionId || !action) return Promise.resolve(false)
+      const run = (current) => {
+        if (!current.name) return sessionPrompt(sessionId, current.text)
+        const line = `/${current.name} ${JSON.stringify(current.args || {})}`
+        return sessionCommand(sessionId, line).then((state) => {
+          if (state === 'executed') return current.next ? run(current.next) : true
+          if (state === 'failed') return false
+          return sessionPrompt(sessionId, current.text)
+        })
+      }
+      return run(action)
+    },
     [sessionId],
   )
 
@@ -261,7 +281,7 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
               actions: React.createElement(
                 IconBtn,
                 {
-                  label: pending ? 'Refresh requested…' : 'Refresh via agent (runs git_workspace)',
+                  label: pending ? 'Refreshing…' : 'Refresh workspace',
                   onClick: refresh,
                 },
                 React.createElement(IconRefreshOutline14, { size: 14 }),
@@ -275,7 +295,7 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
               canRefresh: Boolean(sessionId),
               autoSampled,
               onRefresh: refresh,
-              onPrompt: sessionId ? sendPrompt : null,
+              onDispatch: sessionId ? sendDispatch : null,
             }),
           ),
           document.body,

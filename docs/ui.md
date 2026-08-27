@@ -174,7 +174,8 @@ loaded" behavior stays disabled even when the branch genuinely has no PR.
 Prompting the agent (`binding(sessionId).session.prompt(...)` asking for a
 `git_workspace` run) remains only for:
 
-- the explicit refresh button in the drawer header (user-initiated), and
+- fallback when native commands are unavailable (a host whose session has no
+  `command()` method), and
 - sessions where no projection payload ever arrived (headless CLI, or a host
   without the projection subsystem): opening the drawer with no data
   auto-prompts once per open, and the PR tab still auto-prompts once per
@@ -183,6 +184,14 @@ Prompting the agent (`binding(sessionId).session.prompt(...)` asking for a
   agent turn.
 
 The empty-state CTA uses the same prompt path.
+
+The drawer's **refresh button** goes through the native channel first:
+`/git-refresh {}` forces a fresh local sample (see `forceSample`); only when
+the command channel is unavailable does it fall back to prompting for a
+`git_workspace` turn. A dispatched write command does **not** by itself bump
+the projection until the next `turn/end` sample, so the panel pairs mutation
+commands with a following `/git-refresh` (or relies on the turn-end sampler)
+to surface the new state.
 
 The local auto-sampler is throttled: before every full sample it takes a cheap
 local fingerprint (`git rev-parse HEAD` + `git status --porcelain`), skips the
@@ -222,46 +231,99 @@ initiated — never fired by automatic sampling or refresh paths.
 
 ## Write controls in the panel
 
-The panel exposes the write tools as compact controls. The UI cannot call
-tools directly (no client→tool RPC in DSH), so every control emits one queued
-agent turn whose text names exactly which tool to run and with which
-arguments — deterministic forwarding, not free-form chat.
+The panel exposes the write tools as compact controls. Controls now dispatch
+through DSH's **native slash-command channel**: the client calls
+`session.command('/git-… {…}')` (see [`sessionCommand`](../src/client/services.js)),
+which the host routes to a **`dsh-commands` `CommandRuntime` handler registered
+by [src/commands.ts](../src/commands.ts). The handler runs the same backend
+tools directly — no model turn, no LLM tokens, no queued prompt — while still
+going through every backend validation and blast-radius guard. The dissolved
+legacy prompt forwarder (`session.prompt(…)`) remains only as a **fallback**
+when native commands are unavailable (a host without `dsh-commands`).
 
 Source Control tab:
 
 - **Per-file Stage/Unstage** — every row in the Changes and Untracked cards
-  carries a `Stage`/`Unstage` button that prompts `git_stage`/`git_unstage`
+  carries a `Stage`/`Unstage` button that dispatches `git-stage`/`git-unstage`
   for that exact path.
-- **Stage All / Unstage All** — header buttons that prompt the same tools
-  with `all:true`.
+- **Stage All / Unstage All** — header buttons that dispatch the same
+  commands with `all:true`.
 - **Commit box** — a message textarea (Ctrl/Cmd+Enter submits) plus a primary
   button: it reads `Commit` when a message is typed and falls back to
   `Stage All` when empty.
 - **Git action menu** — an overflow menu next to the commit box with Commit,
-  Commit & Push, Commit & Sync (`git_stage` → `git_commit` → `git_push`
-  prompt chains), Push, Force Push (framed as force-with-lease semantics),
+  Commit & Push, Commit & Sync (`git-stage` → `git-commit` → `git-push`
+  command chains), Push, Force Push (framed as force-with-lease semantics),
   New Branch / Switch Branch / Merge Branch (each opens a small name input,
-  then prompts `git_branch_create` / `git_checkout` / `git_merge`),
-  Create PR / Push before PR (`github_pr_create`; disabled with a note while
-  a pull request already exists), read-only sync entries (Pull, Fast-forward,
+  then dispatches `git-branch-create` / `git-checkout` / `git-merge`),
+  Create PR / Push before PR (`git-pr-create`; disabled with a note while a
+  pull request already exists), read-only sync entries (Pull, Fast-forward,
   Sync, Rebase from upstream, Fetch, Publish), and Discard Changes
-  (`git_reset`, with the confirm:true requirement spelled out).
+  (`git-discard`, the hard-reset command with confirm:true built in).
 
 Pull Request tab:
 
 - **Merge & review card** — a Merge/Squash/Rebase segmented choice (defaults
   to Squash) and a "Delete source branch" checkbox feed one big merge button
-  that prompts `github_pr_merge` with `method` and, when checked,
-  `deleteBranch:true`. Below it, Approve and Request changes buttons prompt
-  `github_pr_review` (`REQUEST_CHANGES` notes that a review body is
-  required). Both sections disable themselves once the PR is merged or
-  closed.
-- **Comment composer** — a textarea + Comment button that prompts
-  `github_pr_comment` with the PR number and body.
+  that dispatches `github_pr_merge` (`/git-pr-merge`) with `method` and, when
+  checked, `deleteBranch:true`. Below it, Approve and Request changes buttons
+  dispatch `github_pr_review` (`/git-pr-review`; `REQUEST_CHANGES` notes that a
+  review body is required). Both sections disable themselves once the PR is
+  merged or closed.
+- **Comment composer** — a textarea + Comment button that dispatches
+  `/git-pr-comment` with the PR number and body.
 
-Because each control rides a normal agent turn, every mutation still flows
+Because each control rides a native command, every mutation still flows
 through the backend's validation, structured errors, and blast-radius guards
 (such as the hard-reset confirmation gate) — the UI adds no bypass path.
+
+## Tool-to-command coverage
+
+Not every backend tool has a native `/git-…` command yet. The mapping below is
+the current coverage (checked against `src/index.ts` tool registrations and
+`src/commands.ts` registrations):
+
+Covered natively (the write paths the panel exposes):
+
+| Tool | Command | Notes |
+| --- | --- | --- |
+| `git_stage` | `git-stage` | |
+| `git_unstage` | `git-unstage` | |
+| `git_commit` | `git-commit` | |
+| `git_push` | `git-push` | |
+| `git_branch_create` | `git-branch-create` | |
+| `git_checkout` | `git-checkout` | |
+| `git_merge` | `git-merge` | |
+| `git_reset` | `git-discard` | Partial — hard-reset to HEAD only, `confirm:true` baked in; no `mode`/`ref` surface |
+| `github_pr_create` | `git-pr-create` | |
+| `github_pr_merge` | `git-pr-merge` | |
+| `github_pr_comment` | `git-pr-comment` | |
+| `github_pr_review` | `git-pr-review` | |
+| — (composite) | `git-commit-push`, `git-commit-sync`, `git-sync` | stage→commit→push / commit→ff→push chains |
+| — (sync helpers) | `git-fetch`, `git-pull`, `git-fast-forward`, `git-rebase` | implemented in `src/git/syncops.ts` |
+| — (projection) | `git-refresh` | `forceSample()`; no tool equivalent |
+
+Still without a native command (read-only surface — the panel falls back to a
+queued agent prompt for these today):
+
+| Tool | Command | Why it matters |
+| --- | --- | --- |
+| `git_workspace` | (only `/git-refresh`, which re-samples the projection) | No `git-workspace` command |
+| `git_status` · `git_files` · `git_diff` | — | Diff / status are the "Ask agent" full-diff and binary-show paths |
+| `git_commits` · `git_show` · `git_compare` · `git_blame` | — | Commit/history and blame views (the panel renders these from the sampled meta today) |
+| `git_branches` · `git_remotes` · `git_worktrees` · `git_stash` · `git_tags` | — | Branch/remote/stash/tag listings feed dropdowns that could dispatch without a turn |
+| `github_pr` · `github_pr_diff` · `github_pr_reviews` · `github_pr_comments` | — | PR detail + full diff are the "Ask agent" paths the panel still forwards |
+| `github_ci` · `github_ci_logs` · `github_issue` · `github_issue_comments` · `github_releases` | — | Read-only PR/CI/issue/release fetches with no panel control yet |
+
+So the architecture already removes the DSH conversation for every mutation
+the panel offers today — staging, commit, push, branch ops, merge, discard,
+PR create/merge/comment/review, and the sync helpers all dispatch through
+`session.command()` with no agent turn. The remaining dialog paths are the
+read-only fetches above, plus the empty-session fallback (no `command()`
+method on the runtime / broken sampling). Migrating those is pure ergonomics —
+wrapping a read-only tool in `toolCommand` in `src/commands.ts` and letting
+the panel call `/git-status`, `/git-diff`, `/git-pr` etc. closes them with
+zero new write surface.
 
 ## Building the client
 
@@ -275,11 +337,14 @@ classic script DSH serves at `/plugins/@tzzs/dsh-git-workspace/client.js`.
 
 ## Future mutation
 
-The write tools above shipped through the existing toolview + panel
-architecture without structural change, and further risky operations (such as
-`github_pr_close`) slot in the same way: register the tool in `src/index.ts`
-with a blast-radius description, then add a panel control that forwards a
-deterministic prompt. Rules that hold no matter how risky a tool is: its
+The write tools above shipped through the native command architecture: each
+backend tool gets a `/git-…` command in [src/commands.ts](../src/commands.ts)
+(`toolCommand` wraps the tool function and parses JSON args — no shell, no
+model turn), and the panel control dispatches that command via
+`session.command()`. Further risky operations (such as `github_pr_close`)
+slot in the same way: register the tool in `src/index.ts` with a blast-radius
+description, wrap it as a native command, then add a panel control that
+dispatches the command. Rules that hold no matter how risky a command is: its
 description states what it can destroy; it runs only from an explicit user
-action or agent turn (never automatic sampling/refresh); and the UI pairs
-destructive buttons with confirmation before prompting.
+action (never automatic sampling/refresh); and the UI pairs destructive
+buttons with confirmation before dispatching.

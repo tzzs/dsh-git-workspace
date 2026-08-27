@@ -107,7 +107,7 @@ function treeSize(node) {
   return n
 }
 
-function DirNode({ dir, depth, onPrompt }) {
+function DirNode({ dir, depth, onDispatch }) {
   const [open, setOpen] = React.useState(true)
   return React.createElement(
     React.Fragment,
@@ -138,19 +138,19 @@ function DirNode({ dir, depth, onPrompt }) {
       ),
       React.createElement(Muted, null, String(treeSize(dir))),
     ),
-    open ? React.createElement(TreeNodeRows, { node: dir, depth: depth + 1, onPrompt }) : null,
+    open ? React.createElement(TreeNodeRows, { node: dir, depth: depth + 1, onDispatch }) : null,
   )
 }
 
-function TreeNodeRows({ node, depth, onPrompt }) {
+function TreeNodeRows({ node, depth, onDispatch }) {
   const rows = []
   const dirs = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
   for (const dir of dirs) {
-    rows.push(React.createElement(DirNode, { key: 'd/' + dir.name, dir, depth, onPrompt }))
+    rows.push(React.createElement(DirNode, { key: 'd/' + dir.name, dir, depth, onDispatch }))
   }
   for (const f of files) {
-    rows.push(React.createElement(FileTreeRow, { key: f.path + f.staged, file: f, depth, onPrompt }))
+    rows.push(React.createElement(FileTreeRow, { key: f.path + f.staged, file: f, depth, onDispatch }))
   }
   return rows
 }
@@ -163,13 +163,12 @@ function hasPatch(file) {
   )
 }
 
-function fileStageControl(file, onPrompt) {
-  if (!onPrompt) return null
+function fileStageControl(file, onDispatch) {
+  if (!onDispatch) return null
   const staged = file.staged === true
-  const prompt =
-    (staged
-      ? `Use the git_unstage tool to unstage ${JSON.stringify(file.path)}.`
-      : `Use the git_stage tool to stage ${JSON.stringify(file.path)}.`) + PROMPT_SUFFIX
+  const action = staged
+    ? {name: 'git-unstage', args: {paths: [file.path]}, text: `Use the git_unstage tool to unstage ${JSON.stringify(file.path)}.${PROMPT_SUFFIX}`}
+    : {name: 'git-stage', args: {paths: [file.path]}, text: `Use the git_stage tool to stage ${JSON.stringify(file.path)}.${PROMPT_SUFFIX}`}
   return React.createElement(
     'span',
     { onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
@@ -177,8 +176,8 @@ function fileStageControl(file, onPrompt) {
       'button',
       {
         type: 'button',
-        title: staged ? 'Ask the agent to unstage this file' : 'Ask the agent to stage this file',
-        onClick: () => onPrompt(prompt),
+        title: staged ? 'Unstage this file' : 'Stage this file',
+        onClick: () => onDispatch(action),
         style: {
           border: 'none',
           background: 'none',
@@ -197,7 +196,7 @@ function fileStageControl(file, onPrompt) {
   )
 }
 
-function FileTreeRow({ file, depth, onPrompt }) {
+function FileTreeRow({ file, depth, onDispatch }) {
   const [open, setOpen] = React.useState(false)
   const rowStyle = { padding: `2px 6px 2px ${depth * 12 + 22}px`, gap: '5px' }
   if (!hasPatch(file)) {
@@ -212,7 +211,7 @@ function FileTreeRow({ file, depth, onPrompt }) {
       React.createElement(Code, { style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
       React.createElement(FileStats, { additions: file.additions, deletions: file.deletions }),
       React.createElement(StatusChip, { status: file.status }),
-      fileStageControl(file, onPrompt),
+      fileStageControl(file, onDispatch),
       React.createElement(CopyBtn, { text: file.path, label: 'Copy path' }),
     )
   }
@@ -250,7 +249,7 @@ function FileTreeRow({ file, depth, onPrompt }) {
       React.createElement(Code, { style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
       React.createElement(FileStats, { additions: file.additions, deletions: file.deletions }),
       React.createElement(StatusChip, { status: file.status }),
-      fileStageControl(file, onPrompt),
+      fileStageControl(file, onDispatch),
       React.createElement(
         'span',
         { className: 'dgw-copy', onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
@@ -261,7 +260,14 @@ function FileTreeRow({ file, depth, onPrompt }) {
       ? React.createElement(
           'div',
           { style: { margin: `0 -6px 0 ${depth * 12 + 28}px` } },
-          React.createElement(DiffViewer, { file, onClose: () => setOpen(false), onPrompt }),
+          React.createElement(
+            DiffViewer,
+            {
+              file,
+              onClose: () => setOpen(false),
+              onAskFull: (text) => onDispatch({text}),
+            },
+          ),
         )
       : null,
   )
@@ -362,6 +368,50 @@ function BranchHeader({ data, refreshing, onOpenPr }) {
   )
 }
 
+function actionCommand(action, message, data, branch) {
+  const base = (data.comparison && data.comparison.base) || 'main'
+  const head = data.branch && data.branch.name
+  const firstCommit =
+    Array.isArray(data.commits && data.commits.recent) && data.commits.recent.length > 0
+      ? String(data.commits.recent[0].message || '').split('\n')[0].trim()
+      : ''
+  const title = firstCommit || `Merge ${head || 'branch'} into ${base}`
+  const body = `${data.repository && data.repository.name ? `Pull request for \`${data.repository.name}\`.\n\n` : ''}Created from the Git Workspace panel.`
+  switch (action) {
+    case 'stage-all': return {name: 'git-stage', args: {all: true}, text: actionPrompt(action, message, data, branch)}
+    case 'unstage-all': return {name: 'git-unstage', args: {all: true}, text: actionPrompt(action, message, data, branch)}
+    case 'commit': return {name: 'git-commit', args: {message}, text: actionPrompt(action, message, data, branch)}
+    case 'commit-push': return {name: 'git-commit-push', args: {message}, text: actionPrompt(action, message, data, branch)}
+    case 'commit-sync':
+      return {
+        name: 'git-commit-sync',
+        args: {message},
+        next: {text: 'Run the git_workspace tool now and report the refreshed workspace summary.'},
+        text: actionPrompt(action, message, data, branch),
+      }
+    case 'push': return {name: 'git-push', args: {}, text: actionPrompt(action, message, data, branch)}
+    case 'force-push': return {name: 'git-push', args: {force: true}, text: actionPrompt(action, message, data, branch)}
+    case 'new-branch': return {name: 'git-branch-create', args: {name: branch}, text: actionPrompt(action, message, data, branch)}
+    case 'switch-branch': return {name: 'git-checkout', args: {branch}, text: actionPrompt(action, message, data, branch)}
+    case 'merge-branch': return {name: 'git-merge', args: {branch}, text: actionPrompt(action, message, data, branch)}
+    case 'create-pr':
+      return {
+        name: 'git-pr-create',
+        args: {base, ...(head ? {head} : {}), title, body},
+        text: createPrPrompt(data),
+      }
+    case 'push-before-pr': return {name: 'git-push', args: {}, text: actionPrompt(action, message, data, branch)}
+    case 'pull': return {name: 'git-pull', args: {}, text: actionPrompt(action, message, data, branch)}
+    case 'fast-forward': return {name: 'git-fast-forward', args: {}, text: actionPrompt(action, message, data, branch)}
+    case 'sync': return {name: 'git-sync', args: {}, text: actionPrompt(action, message, data, branch)}
+    case 'rebase': return {name: 'git-rebase', args: {}, text: actionPrompt(action, message, data, branch)}
+    case 'fetch': return {name: 'git-fetch', args: {}, text: actionPrompt(action, message, data, branch)}
+    case 'publish': return {name: 'git-push', args: {}, text: actionPrompt(action, message, data, branch)}
+    case 'discard': return {name: 'git-discard', args: {confirm: true}, text: actionPrompt(action, message, data, branch)}
+    default: return {text: actionPrompt(action, message, data, branch)}
+  }
+}
+
 const GIT_ACTIONS = [
   ['commit', 'Commit'], ['commit-push', 'Commit & Push'], ['commit-sync', 'Commit & Sync'],
   ['stage-all', 'Stage All'], ['unstage-all', 'Unstage All'],
@@ -401,17 +451,18 @@ function actionPrompt(action, message, data, branch) {
   return `${prompts[action] || 'Run the selected Git operation.'}${PROMPT_SUFFIX}`
 }
 
-function CommitBox({ onPrompt, data }) {
+function CommitBox({ onDispatch, data }) {
   const [msg, setMsg] = React.useState('')
   const [busy, setBusy] = React.useState(false)
   const [menu, setMenu] = React.useState(false)
   const [branchAction, setBranchAction] = React.useState(null)
   const [branchName, setBranchName] = React.useState('')
   const run = (action, extra) => {
-    if (busy || !onPrompt) return
+    if (busy || !onDispatch) return
+    const message = msg.trim()
     setBusy(true)
     setMenu(false)
-    Promise.resolve(onPrompt(actionPrompt(action, msg.trim(), data, extra))).finally(() => {
+    Promise.resolve(onDispatch(actionCommand(action, message, data, extra))).finally(() => {
       setBusy(false)
       if (action === 'commit' || action === 'commit-push' || action === 'commit-sync') setMsg('')
     })
@@ -475,21 +526,21 @@ function CommitBox({ onPrompt, data }) {
               }
             },
           }),
-          React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: busy || !branchName.trim(), onClick: confirmBranch, title: `Ask the agent to ${BRANCH_ACTION_VERBS[branchAction].toLowerCase()} this branch`, style: { width: 'auto', padding: '0 12px', flex: 'none' } }, BRANCH_ACTION_VERBS[branchAction]),
+          React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: busy || !branchName.trim(), onClick: confirmBranch, title: `${BRANCH_ACTION_VERBS[branchAction]} this branch`, style: { width: 'auto', padding: '0 12px', flex: 'none' } }, BRANCH_ACTION_VERBS[branchAction]),
           React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: busy, onClick: () => setBranchAction(null), style: { width: 'auto', padding: '0 10px', flex: 'none' } }, 'Cancel'),
         )
       : null,
   )
 }
 
-function ChangesBody({ data, onPrompt }) {
+function ChangesBody({ data, onDispatch }) {
   const all = Array.isArray(data.files) ? data.files : []
-  const bulk = onPrompt && !data.clean
+  const bulk = onDispatch && !data.clean
     ? React.createElement(
         Row,
         { style: { gap: '6px', paddingBottom: '6px', flex: 'none', flexWrap: 'wrap' } },
-        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', style: { width: 'auto', padding: '0 10px', flex: 'none' }, title: 'Ask the agent to stage every change', onClick: () => onPrompt(actionPrompt('stage-all', '', data)) }, 'Stage all'),
-        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', style: { width: 'auto', padding: '0 10px', flex: 'none' }, title: 'Ask the agent to unstage everything', onClick: () => onPrompt(actionPrompt('unstage-all', '', data)) }, 'Unstage all'),
+        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', style: { width: 'auto', padding: '0 10px', flex: 'none' }, title: 'Stage every change', onClick: () => onDispatch(actionCommand('stage-all', '', data)) }, 'Stage all'),
+        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', style: { width: 'auto', padding: '0 10px', flex: 'none' }, title: 'Unstage everything', onClick: () => onDispatch(actionCommand('unstage-all', '', data)) }, 'Unstage all'),
       )
     : null
   if (all.length > 0) {
@@ -498,7 +549,7 @@ function ChangesBody({ data, onPrompt }) {
       'div',
       { style: { display: 'flex', flexDirection: 'column' } },
       bulk,
-      React.createElement(TreeNodeRows, { node: tree, depth: 0, onPrompt }),
+      React.createElement(TreeNodeRows, { node: tree, depth: 0, onDispatch }),
       data.filesTruncated
         ? React.createElement(
             'div',
@@ -736,7 +787,7 @@ function CommentItem({ comment, dimmed }) {
   )
 }
 
-function CommentsSection({ pr, comments, onPrompt, canComment }) {
+function CommentsSection({ pr, comments, onDispatch, canComment }) {
   const unresolved = comments.filter((c) => !c.resolved)
   const resolved = comments.filter((c) => c.resolved)
   return React.createElement(
@@ -754,28 +805,36 @@ function CommentsSection({ pr, comments, onPrompt, canComment }) {
     comments.length === 0 ? React.createElement(Muted, null, 'No comments yet.') : null,
     unresolved.map((c) => React.createElement(CommentItem, { key: c.id, comment: c })),
     resolved.map((c) => React.createElement(CommentItem, { key: c.id, comment: c, dimmed: true })),
-    onPrompt ? React.createElement(CommentComposer, { pr, disabled: !canComment, onPrompt }) : null,
+    onDispatch ? React.createElement(CommentComposer, { pr, disabled: !canComment, onDispatch }) : null,
   )
 }
 
 const MERGE_METHODS = [['merge', 'Merge'], ['squash', 'Squash'], ['rebase', 'Rebase']]
 
-function MergeReviewControls({ pr, state, onPrompt }) {
+function MergeReviewControls({ pr, state, onDispatch }) {
   const open = state === 'OPEN' && pr.merged !== true
   const [method, setMethod] = React.useState('squash')
   const [delBranch, setDelBranch] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
-  const act = (prompt) => {
-    if (busy || !open || !onPrompt) return
+  const act = (action) => {
+    if (busy || !open || !onDispatch) return
     setBusy(true)
-    Promise.resolve(onPrompt(prompt)).finally(() => setBusy(false))
+    Promise.resolve(onDispatch(action)).finally(() => setBusy(false))
   }
-  const reviewPrompt = (reviewState) =>
-    `Use the github_pr_review tool with number ${pr.number} and state "${reviewState}"` +
-    (reviewState === 'REQUEST_CHANGES'
-      ? ' (a review comment body is required - describe the requested changes).'
-      : '.') +
-    PROMPT_SUFFIX
+  const reviewAction = (reviewState) => ({
+    name: 'git-pr-review',
+    args: {
+      number: pr.number,
+      state: reviewState,
+      ...(reviewState === 'REQUEST_CHANGES' ? {body: 'Please address the requested changes.'} : {}),
+    },
+    text:
+      `Use the github_pr_review tool with number ${pr.number} and state "${reviewState}"` +
+      (reviewState === 'REQUEST_CHANGES'
+        ? ' (a review comment body is required - describe the requested changes).'
+        : '.') +
+      PROMPT_SUFFIX,
+  })
   const mergeLabel =
     method === 'merge' ? 'Merge' : method === 'squash' ? 'Squash and merge' : 'Rebase and merge'
   return React.createElement(
@@ -824,11 +883,14 @@ function MergeReviewControls({ pr, state, onPrompt }) {
           type: 'button',
           className: 'dgw-mergebtn',
           disabled: !open || busy,
-          title: 'Ask the agent to merge this pull request with the selected method',
+          title: 'Merge this pull request with the selected method',
           onClick: () =>
-            act(
-              `Use the github_pr_merge tool with number ${pr.number} and method "${method}"${delBranch ? ' and deleteBranch:true' : ''}.${PROMPT_SUFFIX}`,
-            ),
+            act({
+              name: 'git-pr-merge',
+              args: {number: pr.number, method, ...(delBranch ? {deleteBranch: true} : {})},
+              next: {text: 'Run the git_workspace tool now and report the refreshed workspace summary.'},
+              text: `Use the github_pr_merge tool with number ${pr.number} and method "${method}"${delBranch ? ' and deleteBranch:true' : ''}.${PROMPT_SUFFIX}`,
+            }),
         },
         React.createElement(IconBranchOutline16, { size: 14 }),
         busy ? 'Working…' : mergeLabel,
@@ -836,8 +898,8 @@ function MergeReviewControls({ pr, state, onPrompt }) {
       React.createElement(
         'div',
         { style: { display: 'flex', gap: '6px', flex: 'none' } },
-        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Ask the agent to approve this pull request', style: { flex: '1 1 0', width: 'auto' }, onClick: () => act(reviewPrompt('APPROVE')) }, 'Approve'),
-        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Ask the agent to request changes on this pull request', style: { flex: '1 1 0', width: 'auto', color: 'var(--dsw-alias-state-warn-primary)' }, onClick: () => act(reviewPrompt('REQUEST_CHANGES')) }, 'Request changes'),
+        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Approve this pull request', style: { flex: '1 1 0', width: 'auto' }, onClick: () => act(reviewAction('APPROVE')) }, 'Approve'),
+        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Request changes on this pull request', style: { flex: '1 1 0', width: 'auto', color: 'var(--dsw-alias-state-warn-primary)' }, onClick: () => act(reviewAction('REQUEST_CHANGES')) }, 'Request changes'),
       ),
       !open
         ? React.createElement(Muted, null, state === 'MERGED' ? 'Pull request is already merged.' : 'Merging and reviews are available while the pull request is open.')
@@ -846,15 +908,20 @@ function MergeReviewControls({ pr, state, onPrompt }) {
   )
 }
 
-function CommentComposer({ pr, disabled, onPrompt }) {
+function CommentComposer({ pr, disabled, onDispatch }) {
   const [text, setText] = React.useState('')
   const [busy, setBusy] = React.useState(false)
   const submit = () => {
     const body = text.trim()
-    if (!body || busy || disabled || !onPrompt) return
+    if (!body || busy || disabled || !onDispatch) return
     setBusy(true)
     Promise.resolve(
-      onPrompt(`Use the github_pr_comment tool with number ${pr.number} and body ${JSON.stringify(body)}.${PROMPT_SUFFIX}`),
+      onDispatch({
+        name: 'git-pr-comment',
+        args: {number: pr.number, body},
+        next: {text: 'Run the git_workspace tool now and report the refreshed workspace summary.'},
+        text: `Use the github_pr_comment tool with number ${pr.number} and body ${JSON.stringify(body)}.${PROMPT_SUFFIX}`,
+      }),
     ).finally(() => {
       setBusy(false)
       setText('')
@@ -865,7 +932,7 @@ function CommentComposer({ pr, disabled, onPrompt }) {
     { style: { display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '8px', marginTop: '4px', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
     React.createElement('textarea', {
       className: 'dgw-textarea',
-      placeholder: 'Ask the agent to post a comment…',
+      placeholder: 'Post a comment…',
       rows: 2,
       value: text,
       'aria-label': 'Comment text',
@@ -881,14 +948,11 @@ function CommentComposer({ pr, disabled, onPrompt }) {
     React.createElement(
       'div',
       { style: { display: 'flex', justifyContent: 'flex-end' } },
-      React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: disabled || busy || !text.trim(), onClick: submit, title: 'Ask the agent to post this comment', style: { width: 'auto', padding: '0 14px', flex: 'none' } }, busy ? 'Working…' : 'Comment'),
+      React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: disabled || busy || !text.trim(), onClick: submit, title: 'Post this comment', style: { width: 'auto', padding: '0 14px', flex: 'none' } }, busy ? 'Working…' : 'Comment'),
     ),
   )
 }
 
-// The UI cannot call tools directly (no client→tool RPC in DSH), so mutations
-// go through one queued agent turn whose text names exactly which tool to run
-// and with which arguments — deterministic forwarding, not free-form chat.
 function createPrPrompt(data) {
   const branch = data.branch && data.branch.name
   const base = (data.comparison && data.comparison.base) || 'main'
@@ -914,7 +978,7 @@ function createPrPrompt(data) {
   return lines.join('\n')
 }
 
-function PrTab({ data, refreshing, canRefresh, onRefresh, onPrompt, autoSampled }) {
+function PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSampled }) {
   const pr = data.pullRequest
   if (!pr) {
     const upstream = data.branch && data.branch.upstream
@@ -922,14 +986,15 @@ function PrTab({ data, refreshing, canRefresh, onRefresh, onPrompt, autoSampled 
     return React.createElement(
       'div',
       { style: { padding: '12px 2px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start', flex: 'none' } },
-      onPrompt
+      onDispatch
         ? React.createElement(
             'button',
             {
               type: 'button',
               className: 'dgw-createpr',
-              title: 'Ask the agent to open a pull request for this branch',
-              onClick: () => onPrompt(createPrPrompt(data)),
+              title: 'Open a pull request for this branch',
+              onClick: () =>
+                onDispatch(actionCommand('create-pr', '', data)),
             },
             React.createElement(IconBranchOutline16, { size: 14 }),
             'Create PR',
@@ -1014,15 +1079,15 @@ function PrTab({ data, refreshing, canRefresh, onRefresh, onPrompt, autoSampled 
           )
         : null,
     ),
-    onPrompt
-      ? React.createElement(MergeReviewControls, { pr, state, onPrompt })
+    onDispatch
+      ? React.createElement(MergeReviewControls, { pr, state, onDispatch })
       : null,
     React.createElement(ChecksSection, { ci: data.ci }),
-    React.createElement(CommentsSection, { pr, comments, onPrompt, canComment: state === 'OPEN' && pr.merged !== true }),
+    React.createElement(CommentsSection, { pr, comments, onDispatch, canComment: state === 'OPEN' && pr.merged !== true }),
   )
 }
 
-function ScTab({ data, refreshing, onPrompt, onOpenPr }) {
+function ScTab({ data, refreshing, onDispatch, onOpenPr }) {
   const dirty = countDirty(data)
   const ahead = typeof data.commitsAhead === 'number' ? data.commitsAhead : (data.branch && data.branch.ahead) || 0
   const branchCommits = Array.isArray(data.commits) ? data.commits.slice(0, ahead) : []
@@ -1030,11 +1095,11 @@ function ScTab({ data, refreshing, onPrompt, onOpenPr }) {
     React.Fragment,
     null,
     React.createElement(BranchHeader, { data, refreshing, onOpenPr }),
-    !data.clean && onPrompt ? React.createElement(CommitBox, { onPrompt, data }) : null,
+    !data.clean && onDispatch ? React.createElement(CommitBox, { onDispatch, data }) : null,
     React.createElement(
       Section,
       { title: 'Changes', count: dirty || null, defaultOpen: true },
-      React.createElement(ChangesBody, { data, onPrompt }),
+      React.createElement(ChangesBody, { data, onDispatch }),
     ),
     React.createElement(
       Section,
@@ -1100,7 +1165,7 @@ function TabBar({ tab, setTab, prHint }) {
   )
 }
 
-export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRefresh, autoSampled, onRefresh, onPrompt }) {
+export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRefresh, autoSampled, onRefresh, onDispatch }) {
   const [tab, setTab] = React.useState('sc')
 
   // Fallback-only: when no projection payload exists at all, the PR tab asks
@@ -1148,7 +1213,7 @@ export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRef
       React.Fragment,
       null,
       React.createElement(TabBar, { tab, setTab, prHint: data.pullRequest ? (prUnresolved || null) : null }),
-      tab === 'pr' ? PrTab({ data, refreshing, canRefresh, onRefresh, onPrompt, autoSampled }) : ScTab({ data, refreshing, onPrompt, onOpenPr: () => setTab('pr') }),
+      tab === 'pr' ? PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSampled }) : ScTab({ data, refreshing, onDispatch, onOpenPr: () => setTab('pr') }),
     )
   }
 

@@ -100,15 +100,14 @@ function StatSpan({ additions, deletions }) {
   )
 }
 
-export function DiffViewer({ file, onClose, onPrompt }) {
+export function DiffViewer({ file, onClose, onAskFull }) {
   ensureStyles()
   const c = STATUS_LETTER[file.status] || STATUS_LETTER.modified
   const binary = file.diffOmitted === 'binary'
   const oversize = file.diffOmitted === 'size'
   const hunks = Array.isArray(file.hunks) ? file.hunks : []
   const askFull = () =>
-    onPrompt &&
-    onPrompt(`Run the git_diff tool for the file "${file.path}" and report its full diff.`)
+    onAskFull && onAskFull(`Run the git_diff tool for the file "${file.path}" and report its full diff.`)
   return React.createElement(
     'div',
     {
@@ -144,14 +143,14 @@ export function DiffViewer({ file, onClose, onPrompt }) {
           'div',
           { style: { padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } },
           React.createElement(Muted, null, 'Binary file — no textual diff.'),
-          onPrompt ? React.createElement(Button, { variant: 'outline', size: 'sm', onClick: askFull }, 'Ask agent') : null,
+          onAskFull ? React.createElement(Button, { variant: 'outline', size: 'sm', onClick: askFull }, 'Ask agent') : null,
         )
       : oversize
         ? React.createElement(
             'div',
             { style: { padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } },
             React.createElement(Muted, null, 'Diff too large for inline preview.'),
-            onPrompt ? React.createElement(Button, { variant: 'outline', size: 'sm', onClick: askFull }, 'Ask agent for full diff') : null,
+            onAskFull ? React.createElement(Button, { variant: 'outline', size: 'sm', onClick: askFull }, 'Ask agent for full diff') : null,
           )
         : hunks.length === 0
           ? React.createElement('div', { style: { padding: '8px' } }, React.createElement(Muted, null, 'No textual changes.'))
