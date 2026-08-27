@@ -1045,3 +1045,188 @@ test('Create PR empty state dispatches the native github PR command with explici
   assert.equal(create.title, 'feat: do things')
   assert.deepEqual(mock.prompts, [])
 })
+
+test('commit row dispatches the native git-show command for its diff', async () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: null,
+          ci: null,
+          commits: [{ sha: 'abc1234567', shortSha: 'abc1234', message: 'do things', author: 'me', date: 'now' }],
+        },
+      },
+    ],
+  }
+  const mock = sessionMock()
+  const ui = interactiveHeader(conversation, {
+    ctxExtras: {
+      get(name) {
+        if (name !== 'sessions') return undefined
+        return { binding: () => ({ session: mock.session }) }
+      },
+    },
+  })
+  const { body } = ui.render()
+  const viewBtn = ui.findEls(body, (el) => el.type === 'button' && el.props.title === 'View this commit’s diff')[0]
+  assert.ok(viewBtn, 'commit row renders a view-diff control')
+  await viewBtn.props.onClick()
+  assert.deepEqual(mock.commands, ['/git-show {"sha":"abc1234567"}'])
+  assert.deepEqual(mock.prompts, [])
+})
+
+test('a failing CI check offers a native log-fetch CTA; passing checks do not', async () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: { number: 7, title: 'Add thing', state: 'OPEN', url: 'https://github.com/o/r/pull/7', comments: [] },
+          ci: {
+            status: 'failure',
+            checks: [
+              { name: 'build', status: 'completed', conclusion: 'success', url: 'https://github.com/o/r/actions/runs/111' },
+              { name: 'test', status: 'completed', conclusion: 'failure', url: 'https://github.com/o/r/actions/runs/222' },
+            ],
+          },
+        },
+      },
+    ],
+  }
+  const mock = sessionMock()
+  const ui = interactiveHeader(conversation, {
+    ctxExtras: {
+      get(name) {
+        if (name !== 'sessions') return undefined
+        return { binding: () => ({ session: mock.session }) }
+      },
+    },
+  })
+  let { body } = ui.render()
+  const prTabBtn = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Pull Request'))[0]
+  prTabBtn.props.onClick()
+  ;({ body } = ui.render())
+  const logBtns = ui.findEls(body, (el) => el.type === 'button' && el.props.title === 'Fetch failure logs')
+  assert.equal(logBtns.length, 1, 'only the failing check offers a log CTA')
+  await logBtns[0].props.onClick()
+  assert.deepEqual(mock.commands, ['/git-ci-logs {"runId":222}'])
+  assert.deepEqual(mock.prompts, [])
+})
+
+test('the PR header offers a native full-diff fetch CTA', async () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: { number: 7, title: 'Add thing', state: 'OPEN', url: 'https://github.com/o/r/pull/7', comments: [] },
+          ci: null,
+        },
+      },
+    ],
+  }
+  const mock = sessionMock()
+  const ui = interactiveHeader(conversation, {
+    ctxExtras: {
+      get(name) {
+        if (name !== 'sessions') return undefined
+        return { binding: () => ({ session: mock.session }) }
+      },
+    },
+  })
+  let { body } = ui.render()
+  const prTabBtn = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Pull Request'))[0]
+  prTabBtn.props.onClick()
+  ;({ body } = ui.render())
+  const diffBtn = ui.findEls(body, (el) => el.type === 'button' && el.props.title === 'Fetch the full pull request diff')[0]
+  assert.ok(diffBtn, 'PR header renders a full-diff fetch control')
+  await diffBtn.props.onClick()
+  assert.deepEqual(mock.commands, ['/git-pr-diff {"number":7}'])
+  assert.deepEqual(mock.prompts, [])
+})
+
+test('branch/merge inputs offer known branches via a datalist; new-branch input does not', async () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 1, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: false,
+          pullRequest: null,
+          ci: null,
+          files: [{ path: 'a.ts', oldPath: null, status: 'modified', staged: false }],
+          branches: [
+            { name: 'feature/x', current: true, upstream: null, ahead: 0, behind: 0 },
+            { name: 'main', current: false, upstream: 'origin/main', ahead: 0, behind: 0 },
+            { name: 'develop', current: false, upstream: null, ahead: 0, behind: 0 },
+          ],
+        },
+      },
+    ],
+  }
+  const mock = sessionMock()
+  const ui = interactiveHeader(conversation, {
+    ctxExtras: {
+      get(name) {
+        if (name !== 'sessions') return undefined
+        return { binding: () => ({ session: mock.session }) }
+      },
+    },
+  })
+  let { body } = ui.render()
+  const menuBtn = ui.findEls(body, (el) => el.type === 'button' && el.props['aria-label'] === 'More Git operations')[0]
+  assert.ok(menuBtn, 'git action menu toggle renders')
+  menuBtn.props.onClick()
+  ;({ body } = ui.render())
+  const switchBtn = ui.findEls(body, (el) => el.type === 'button' && el.props.className === 'dgw-action' && ownText(el) === 'Switch Branch')[0]
+  assert.ok(switchBtn, 'Switch Branch menu item renders')
+  switchBtn.props.onClick()
+  ;({ body } = ui.render())
+  const input = ui.findEls(body, (el) => el.type === 'input' && el.props['aria-label'] === 'Branch name')[0]
+  assert.equal(input.props.list, 'dgw-known-branches', 'switch-branch input wires to the known-branches datalist')
+  const options = ui.findEls(body, (el) => el.type === 'option').map((el) => el.props.value)
+  assert.deepEqual(options.sort(), ['develop', 'main'], 'datalist offers known branches, excluding the current one')
+
+  const cancelBtn = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Cancel')[0]
+  cancelBtn.props.onClick()
+  ;({ body } = ui.render())
+  menuBtn.props.onClick()
+  ;({ body } = ui.render())
+  const newBtn = ui.findEls(body, (el) => el.type === 'button' && el.props.className === 'dgw-action' && ownText(el) === 'New Branch')[0]
+  newBtn.props.onClick()
+  ;({ body } = ui.render())
+  const input2 = ui.findEls(body, (el) => el.type === 'input' && el.props['aria-label'] === 'Branch name')[0]
+  assert.equal(input2.props.list, undefined, 'new-branch input has no datalist wiring')
+})

@@ -267,11 +267,17 @@ Source Control tab:
   Commit & Push, Commit & Sync (`git-stage` → `git-commit` → `git-push`
   command chains), Push, Force Push (framed as force-with-lease semantics),
   New Branch / Switch Branch / Merge Branch (each opens a small name input,
-  then dispatches `git-branch-create` / `git-checkout` / `git-merge`),
-  Create PR / Push before PR (`git-pr-create`; disabled with a note while a
-  pull request already exists), read-only sync entries (Pull, Fast-forward,
-  Sync, Rebase from upstream, Fetch, Publish), and Discard Changes
-  (`git-discard`, the hard-reset command with confirm:true built in).
+  then dispatches `git-branch-create` / `git-checkout` / `git-merge`; Switch
+  and Merge Branch attach a `<datalist>` of known branches sourced from the
+  already-sampled `data.branches` — autocomplete only, still free text, and
+  New Branch gets no datalist since it names a branch that doesn't exist
+  yet), Create PR / Push before PR (`git-pr-create`; disabled with a note
+  while a pull request already exists), read-only sync entries (Pull,
+  Fast-forward, Sync, Rebase from upstream, Fetch, Publish), and Discard
+  Changes (`git-discard`, the hard-reset command with confirm:true built in).
+- **Commit diff** — each row in the "Committed on branch" / "Commits" cards
+  carries a small icon button that dispatches `/git-show {sha}` for that
+  commit.
 
 Pull Request tab:
 
@@ -282,6 +288,12 @@ Pull Request tab:
   dispatch `github_pr_review` (`/git-pr-review`; `REQUEST_CHANGES` notes that a
   review body is required). Both sections disable themselves once the PR is
   merged or closed.
+- **Full diff** — an icon button next to the PR stat line dispatches
+  `/git-pr-diff {number}`.
+- **CI logs** — a failing check row in the Checks card carries a "Fetch
+  failure logs" icon button that dispatches `/git-ci-logs {runId}`. `runId`
+  is parsed from the check's URL (`/actions/runs/(\d+)`); checks without a
+  GitHub Actions-shaped URL (or that aren't failing) don't show the button.
 - **Comment composer** — a textarea + Comment button that dispatches
   `/git-pr-comment` with the PR number and body.
 
@@ -291,11 +303,13 @@ through the backend's validation, structured errors, and blast-radius guards
 
 ## Tool-to-command coverage
 
-Not every backend tool has a native `/git-…` command yet. The mapping below is
-the current coverage (checked against `src/index.ts` tool registrations and
-`src/commands.ts` registrations):
+Every backend tool now has a native `/git-…` command (checked against
+`src/index.ts` tool registrations and `src/commands.ts` registrations — see
+[`tests/commands.test.js`](../tests/commands.test.js), which registers all of
+them against a throwaway repo and exercises the trickier adapters). What
+differs is whether a panel control dispatches it yet.
 
-Covered natively (the write paths the panel exposes):
+Write commands (the mutation paths the panel exposes):
 
 | Tool | Command | Notes |
 | --- | --- | --- |
@@ -314,27 +328,41 @@ Covered natively (the write paths the panel exposes):
 | — (composite) | `git-commit-push`, `git-commit-sync`, `git-sync` | stage→commit→push / commit→ff→push chains |
 | — (sync helpers) | `git-fetch`, `git-pull`, `git-fast-forward`, `git-rebase` | implemented in `src/git/syncops.ts` |
 | — (projection) | `git-refresh` | `forceSample()`; no tool equivalent |
-| `git_diff` | `git-diff` | Backs the diff viewer's "Fetch full diff" CTA for binary/oversized files; read-only |
 
-Not yet wired to a panel control (registered as a tool but no `/git-…`
-command exists for it, so there is no UI entry point at all — not a chat
-fallback, just an absent feature):
+Read-only commands, with their panel entry point (or "—" where the command
+exists but no control calls it yet — extending coverage there is just adding
+a button, `toolCommand` already wraps the tool):
 
-| Tool | Why it matters |
-| --- | --- |
-| `git_workspace` | Only reachable via `/git-refresh`, which re-samples the projection; no direct `git-workspace` command |
-| `git_status` · `git_files` | No panel control calls these directly today |
-| `git_commits` · `git_show` · `git_compare` · `git_blame` | Commit/history and blame views (the panel renders these from the sampled meta today) |
-| `git_branches` · `git_remotes` · `git_worktrees` · `git_stash` · `git_tags` | Branch/remote/stash/tag listings feed dropdowns that could dispatch without a turn |
-| `github_pr` · `github_pr_diff` · `github_pr_reviews` · `github_pr_comments` | PR detail + full diff views |
-| `github_ci` · `github_ci_logs` · `github_issue` · `github_issue_comments` · `github_releases` | Read-only PR/CI/issue/release fetches with no panel control yet |
+| Tool | Command | Panel entry point |
+| --- | --- | --- |
+| `git_workspace` | `git-workspace` | — (only reachable via `/git-refresh`, which re-samples the projection) |
+| `git_status` | `git-status` | — |
+| `git_files` | `git-files` | — (scope is a positional arg, wrapped: `gitFiles(input.scope ?? 'working-tree', dir)`) |
+| `git_diff` | `git-diff` | Diff viewer's "Fetch full diff" CTA for binary/oversized files |
+| `git_commits` | `git-commits` | — (the panel renders commit history from the sampled meta) |
+| `git_show` | `git-show` | Each commit row's "View this commit's diff" icon button (SC tab) |
+| `git_compare` | `git-compare` | — |
+| `git_blame` | `git-blame` | — |
+| `git_branches` | `git-branches` | Feeds the Switch/Merge Branch input's `<datalist>` from the already-sampled `data.branches` (no extra round trip) |
+| `git_remotes` | `git-remotes` | — |
+| `git_worktrees` | `git-worktrees` | — |
+| `git_stash` | `git-stash` | — (the panel renders the stash count from the sampled meta) |
+| `git_tags` | `git-tags` | — |
+| `github_pr` | `git-pr` | — (the panel renders PR summary from the sampled meta) |
+| `github_pr_diff` | `git-pr-diff` | PR header's "Fetch the full pull request diff" icon button |
+| `github_pr_reviews` | `git-pr-reviews` | — |
+| `github_pr_comments` | `git-pr-comments` | — (the panel renders comments from the sampled meta) |
+| `github_ci` | `git-ci` | — (the panel renders check status from the sampled meta) |
+| `github_ci_logs` | `git-ci-logs` | Failing check rows' "Fetch failure logs" icon button (PR tab); `runId` is parsed from the check's `/actions/runs/(\d+)` URL, so only checks with a GitHub Actions URL show the button |
+| `github_issue` | `git-issue` | — |
+| `github_issue_comments` | `git-issue-comments` | — |
+| `github_releases` | `git-releases` | — |
 
 The panel has **zero chat/agent-turn entry points** — every control either
 dispatches a native `/git-…` command or does nothing (hidden or disabled
-when `onDispatch` is `null`). The tools in the second table simply have no
-UI surface yet; extending coverage is wrapping the read-only tool in
-`toolCommand` in `src/commands.ts` and adding a panel control that calls
-`/git-status`, `/git-pr`, etc. — never a queued prompt.
+when `onDispatch` is `null`). The "—" rows above are commands with no panel
+button yet, not gaps in native-command coverage; wiring one up is adding a
+control that calls the existing `/git-…` command.
 
 ## Building the client
 

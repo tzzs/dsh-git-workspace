@@ -483,10 +483,11 @@ function CommitBox({ onDispatch, data }) {
           React.createElement('input', {
             className: 'dgw-textarea',
             style: { minHeight: '28px', height: '28px', flex: '1 1 auto' },
-            placeholder: 'Branch name',
+            placeholder: branchAction === 'new-branch' ? 'New branch name' : 'Branch name',
             'aria-label': 'Branch name',
             autoFocus: true,
             value: branchName,
+            list: branchAction !== 'new-branch' ? 'dgw-known-branches' : undefined,
             onChange: (e) => setBranchName(e.target.value),
             onKeyDown: (e) => {
               if (e.key === 'Enter') {
@@ -501,6 +502,15 @@ function CommitBox({ onDispatch, data }) {
           }),
           React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: busy || !branchName.trim(), onClick: confirmBranch, title: `${BRANCH_ACTION_VERBS[branchAction]} this branch`, style: { width: 'auto', padding: '0 12px', flex: 'none' } }, BRANCH_ACTION_VERBS[branchAction]),
           React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: busy, onClick: () => setBranchAction(null), style: { width: 'auto', padding: '0 10px', flex: 'none' } }, 'Cancel'),
+        )
+      : null,
+    branchAction && branchAction !== 'new-branch' && Array.isArray(data.branches)
+      ? React.createElement(
+          'datalist',
+          { id: 'dgw-known-branches' },
+          data.branches
+            .filter((b) => b && b.name && !b.current)
+            .map((b) => React.createElement('option', { key: b.name, value: b.name })),
         )
       : null,
   )
@@ -552,7 +562,7 @@ function ChangesBody({ data, onDispatch }) {
 
 const GRAPH_LINE = 'var(--dsw-alias-border-l2)'
 
-function CommitGraphRow({ c, i, total, branchName, ahead, upstream }) {
+function CommitGraphRow({ c, i, total, branchName, ahead, upstream, onDispatch }) {
   const isHead = i === 0
   const isLocal = i < ahead
   const isBoundary = Boolean(upstream) && i === ahead
@@ -607,10 +617,24 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream }) {
       isHead && branchName ? React.createElement(Pill, { text: branchName, color: 'var(--dsw-alias-brand-primary)' }) : null,
       isBoundary ? React.createElement(Pill, { text: upstream, color: 'var(--dsw-alias-state-warn-primary)' }) : null,
     ),
+    onDispatch && c.sha
+      ? React.createElement(
+          'button',
+          {
+            type: 'button',
+            className: 'dgw-linkicon',
+            title: 'View this commit’s diff',
+            'aria-label': 'View this commit’s diff',
+            style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', color: 'var(--dsw-alias-label-caption)' },
+            onClick: () => onDispatch({ name: 'git-show', args: { sha: c.sha } }),
+          },
+          React.createElement(IconCodeOutline16, { size: 13 }),
+        )
+      : null,
   )
 }
 
-function CommitGraph({ commits, branch }) {
+function CommitGraph({ commits, branch, onDispatch }) {
   const ahead = branch && typeof branch.ahead === 'number' ? branch.ahead : 0
   const upstream = branch && branch.upstream ? branch.upstream : null
   const branchName = branch && branch.name ? branch.name : null
@@ -626,6 +650,7 @@ function CommitGraph({ commits, branch }) {
         branchName,
         ahead,
         upstream,
+        onDispatch,
       }),
     ),
   )
@@ -654,8 +679,14 @@ function CheckIcon({ check }) {
   return React.createElement(CircleIcon, { tone: 'warn', size: 15 }, React.createElement(IconWarningOutline16, { size: 10 }))
 }
 
-function CheckRow({ check }) {
+function ciRunId(check) {
+  const m = /\/actions\/runs\/(\d+)/.exec(String(check.url || ''))
+  return m ? Number(m[1]) : null
+}
+
+function CheckRow({ check, onDispatch }) {
   const s = checkDotState(check)
+  const runId = s === 'error' ? ciRunId(check) : null
   return React.createElement(
     Row,
     { className: 'dgw-row', style: { gap: '8px', padding: '3px 6px' } },
@@ -675,6 +706,20 @@ function CheckRow({ check }) {
       { style: { fontSize: '11px', color: s === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)', flex: 'none' } },
       checkLabel(check),
     ),
+    onDispatch && runId
+      ? React.createElement(
+          'button',
+          {
+            type: 'button',
+            className: 'dgw-linkicon',
+            title: 'Fetch failure logs',
+            'aria-label': 'Fetch failure logs',
+            style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', color: 'var(--dsw-alias-state-error-primary)' },
+            onClick: () => onDispatch({ name: 'git-ci-logs', args: { runId } }),
+          },
+          React.createElement(IconCodeOutline16, { size: 13 }),
+        )
+      : null,
     check.url
       ? React.createElement(
           'a',
@@ -685,7 +730,7 @@ function CheckRow({ check }) {
   )
 }
 
-function ChecksSection({ ci }) {
+function ChecksSection({ ci, onDispatch }) {
   if (!ci || !ci.checks || ci.checks.length === 0) return null
   const checks = ci.checks
   let passing = 0
@@ -708,7 +753,7 @@ function ChecksSection({ ci }) {
   return React.createElement(
     Section,
     { icon, title: summary, plain: true, defaultOpen: true },
-    checks.slice(0, 15).map((c, i) => React.createElement(CheckRow, { key: `${c.name}:${i}`, check: c })),
+    checks.slice(0, 15).map((c, i) => React.createElement(CheckRow, { key: `${c.name}:${i}`, check: c, onDispatch })),
     checks.length > 15
       ? React.createElement('div', { key: 'more', style: { padding: '2px 6px' } }, React.createElement(Muted, null, `+${checks.length - 15} more`))
       : null,
@@ -1010,6 +1055,20 @@ function PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSample
         React.createElement('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, `-${fmtNum(deletions)}`),
         upstream ? React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, `remote ${upstream}`) : null,
         React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, `${pending} pending commit${pending === 1 ? '' : 's'}`),
+        onDispatch
+          ? React.createElement(
+              'button',
+              {
+                type: 'button',
+                className: 'dgw-linkicon',
+                title: 'Fetch the full pull request diff',
+                'aria-label': 'Fetch the full pull request diff',
+                style: { border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', color: 'var(--dsw-alias-label-caption)' },
+                onClick: () => onDispatch({ name: 'git-pr-diff', args: { number: pr.number } }),
+              },
+              React.createElement(IconCodeOutline16, { size: 13 }),
+            )
+          : null,
       ),
       pr.updatedAt
         ? React.createElement(
@@ -1022,7 +1081,7 @@ function PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSample
     onDispatch
       ? React.createElement(MergeReviewControls, { pr, state, onDispatch })
       : null,
-    React.createElement(ChecksSection, { ci: data.ci }),
+    React.createElement(ChecksSection, { ci: data.ci, onDispatch }),
     React.createElement(CommentsSection, { pr, comments, onDispatch, canComment: state === 'OPEN' && pr.merged !== true }),
   )
 }
@@ -1045,14 +1104,14 @@ function ScTab({ data, refreshing, onDispatch, onOpenPr }) {
       Section,
       { title: 'Committed on branch', count: ahead || null, defaultOpen: true },
       branchCommits.length > 0
-        ? React.createElement(CommitGraph, { commits: branchCommits, branch: data.branch })
+        ? React.createElement(CommitGraph, { commits: branchCommits, branch: data.branch, onDispatch })
         : React.createElement(Muted, null, ahead > 0 ? 'Commit details are unavailable.' : 'No commits ahead of the upstream branch.'),
     ),
     data.commits && data.commits.length > 0
       ? React.createElement(
           Section,
           { title: 'Commits', count: data.commits.length, defaultOpen: true },
-          React.createElement(CommitGraph, { commits: data.commits, branch: data.branch }),
+          React.createElement(CommitGraph, { commits: data.commits, branch: data.branch, onDispatch }),
         )
       : null,
   )
