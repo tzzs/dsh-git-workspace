@@ -372,6 +372,20 @@ test('Git Workspace panel tolerates a git_status meta without a changes summary'
   assert.equal(drawer.props.subtitle.includes('discus'), true, 'falls back to git_status meta')
 })
 
+test('drawer shows a loading state before the first sample lands, never the legacy manual-run button', () => {
+  const tree = renderHeader({ nodes: [] }, { open: true })
+  const text = panelBodyText(tree)
+  assert.ok(text.includes('Loading Git workspace'), 'shows a loading message while data/error/autoSampled are all still unresolved')
+  assert.ok(!text.includes('Run git_workspace'), 'never shows the legacy manual-run CTA')
+})
+
+test('drawer skips the loading state and shows the session hint when there is no session to sample from', () => {
+  const tree = renderHeader({ nodes: [] }, { open: true, sessionId: null })
+  const text = panelBodyText(tree)
+  assert.ok(text.includes('No workspace session available yet'), 'shows the no-session hint immediately instead of loading forever')
+  assert.ok(!text.includes('Run git_workspace'), 'never shows the legacy manual-run CTA')
+})
+
 function sessionMock({ failCommand = false, noCommand = false, unmatched = false } = {}) {
   const recordedCommands = []
   const recordedPrompts = []

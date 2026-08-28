@@ -181,9 +181,9 @@ Firing `/git-refresh {}` remains for:
   force-refreshes once per open, and the PR tab does the same once per
   repo/branch when it has no pull request data yet. Both wait out a short
   2 s grace first, so a slow first sample never triggers a pointless
-  request.
-
-The empty-state CTA dispatches the same `/git-refresh {}` command.
+  request. The drawer shows a loading state for that window instead of a
+  manual "run it yourself" control — there is nothing left for a person to
+  click.
 
 If `session.command` is missing, or a dispatched command comes back
 unmatched (the host has no `dsh-commands` runtime, or `installGitCommands`

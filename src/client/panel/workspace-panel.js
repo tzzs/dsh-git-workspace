@@ -1,6 +1,5 @@
 import * as React from 'react'
 import {
-  Button,
   IconBranchOutline16,
   IconCheckOutline14,
   IconChevronRightOutline14,
@@ -1233,7 +1232,7 @@ function CommentComposer({ pr, disabled, onDispatch }) {
   )
 }
 
-function PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSampled }) {
+function PrTab({ data, refreshing, onDispatch }) {
   const pr = data.pullRequest
   if (!pr) {
     const upstream = data.branch && data.branch.upstream
@@ -1269,13 +1268,7 @@ function PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSample
           target ? `→ ${target}` : 'no upstream',
         ),
       ),
-      refreshing
-        ? React.createElement(Muted, null, 'Loading pull request…')
-        : autoSampled
-          ? null
-          : canRefresh !== false && onRefresh
-            ? React.createElement(Button, { variant: 'outline', size: 'sm', onClick: onRefresh }, 'Run git_workspace')
-            : null,
+      refreshing ? React.createElement(Muted, null, 'Loading pull request…') : null,
     )
   }
   const state = (pr.state || 'open').toUpperCase()
@@ -1506,9 +1499,6 @@ export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRef
             ? REFRESH_HINT
             : 'No workspace data in this session yet.',
       ),
-      onRefresh && canRefresh !== false
-        ? React.createElement(Button, { variant: 'outline', size: 'sm', onClick: onRefresh }, 'Run git_workspace')
-        : null,
     )
   } else {
     const prComments = data.pullRequest && Array.isArray(data.pullRequest.comments) ? data.pullRequest.comments : []
@@ -1526,8 +1516,8 @@ export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRef
         : null,
       React.createElement(TabBar, { tab, setTab, prHint: data.pullRequest ? (prUnresolved || null) : null }),
       tab === 'pr'
-        ? PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSampled })
-        : ScTab({ data, refreshing, onDispatch, onOpenPr: () => setTab('pr'), onRefresh, canRefresh }),
+        ? React.createElement(PrTab, { data, refreshing, onDispatch })
+        : React.createElement(ScTab, { data, refreshing, onDispatch, onOpenPr: () => setTab('pr'), onRefresh, canRefresh }),
     )
   }
 

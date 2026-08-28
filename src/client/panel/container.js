@@ -292,7 +292,10 @@ export function GitWorkspaceControl({ useSession, sessionId, useProjection }) {
             React.createElement(GitWorkspacePanel, {
               data,
               errorText,
-              loading: false,
+              // Only "loading" while a session exists to sample from and
+              // neither data, an error, nor the autoSampled latch has
+              // resolved yet — otherwise this would spin forever.
+              loading: Boolean(sessionId) && data === null && !errorText && !autoSampled,
               refreshing: pending,
               canRefresh: Boolean(sessionId),
               autoSampled,
