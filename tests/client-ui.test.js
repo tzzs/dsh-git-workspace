@@ -1230,3 +1230,135 @@ test('branch/merge inputs offer known branches via a datalist; new-branch input 
   const input2 = ui.findEls(body, (el) => el.type === 'input' && el.props['aria-label'] === 'Branch name')[0]
   assert.equal(input2.props.list, undefined, 'new-branch input has no datalist wiring')
 })
+
+test('changed files nested in single-child directory chains render as one compacted row', () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 2, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: false,
+          pullRequest: null,
+          ci: null,
+          files: [
+            { path: 'src/client/panel/workspace-panel.js', oldPath: null, status: 'modified', staged: false },
+            { path: 'README.md', oldPath: null, status: 'modified', staged: false },
+          ],
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation)
+  const { body } = ui.render()
+  const dirButtons = ui.findEls(body, (el) => el.type === 'button' && String(el.props.className || '').includes('dgw-dirbtn'))
+  assert.equal(dirButtons.length, 1, 'the single-child src/client/panel chain collapses into one directory row')
+  assert.ok(ownText(dirButtons[0]).includes('src/client/panel'), 'the compacted row shows the full merged path')
+})
+
+test('file row icon color reflects git status, with a caption fallback for unknown status', () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 1, renamed: 0, untracked: 0 },
+          clean: false,
+          pullRequest: null,
+          ci: null,
+          files: [
+            { path: 'deleted.ts', oldPath: null, status: 'deleted', staged: false },
+            { path: 'mystery.ts', oldPath: null, status: 'weird-status', staged: false },
+          ],
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation)
+  const { body } = ui.render()
+  const iconSpans = ui.findEls(
+    body,
+    (el) => el.type === 'span' && el.props && el.props.children && el.props.children.type && el.props.children.type.stubName === 'IconCodeOutline16',
+  )
+  assert.equal(iconSpans.length, 2, 'both file rows render a file icon')
+  const colors = iconSpans.map((el) => el.props.style.color)
+  assert.ok(colors.includes('var(--dsw-alias-state-error-primary)'), 'deleted file icon uses the delete color')
+  assert.ok(colors.includes('var(--dsw-alias-label-caption)'), 'unrecognized status falls back to the caption color')
+})
+
+test('commit row expands to show author/date/sha on click; the diff button does not toggle it', async () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: null,
+          ci: null,
+          commits: [
+            { sha: 'aaa1111111', shortSha: 'aaa1111', message: 'first', author: 'me', date: '2024-01-02T00:00:00Z' },
+            { sha: 'bbb2222222', shortSha: 'bbb2222', message: 'second', author: 'me', date: '2024-01-01T00:00:00Z' },
+          ],
+        },
+      },
+    ],
+  }
+  const mock = sessionMock()
+  const ui = interactiveHeader(conversation, {
+    ctxExtras: {
+      get(name) {
+        if (name !== 'sessions') return undefined
+        return { binding: () => ({ session: mock.session }) }
+      },
+    },
+  })
+  let { body } = ui.render()
+  const toggles = ui.findEls(body, (el) => el.props && el.props.title === 'Toggle commit details')
+  assert.equal(toggles.length, 2, 'both commit rows render a toggle')
+
+  assert.ok(
+    ui.findEls(body, (el) => el.type === 'div' && ownText(el).includes('aaa1111')).length > 0,
+    'the HEAD commit is expanded by default and shows its metadata',
+  )
+  assert.equal(
+    ui.findEls(body, (el) => el.type === 'div' && ownText(el).includes('bbb2222')).length,
+    0,
+    'the non-HEAD commit stays collapsed by default',
+  )
+
+  toggles[1].props.onClick()
+  ;({ body } = ui.render())
+  assert.ok(
+    ui.findEls(body, (el) => el.type === 'div' && ownText(el).includes('bbb2222')).length > 0,
+    'clicking the row toggles its metadata open',
+  )
+
+  const diffBtns = ui.findEls(body, (el) => el.type === 'button' && el.props.title === 'View this commit’s diff')
+  assert.equal(diffBtns.length, 2, 'each commit row renders a view-diff control')
+  await diffBtns[1].props.onClick({ stopPropagation() {} })
+  assert.deepEqual(mock.commands, ['/git-show {"sha":"bbb2222222"}'])
+  ;({ body } = ui.render())
+  assert.ok(
+    ui.findEls(body, (el) => el.type === 'div' && ownText(el).includes('bbb2222')).length > 0,
+    'the diff button does not collapse the row it belongs to',
+  )
+})

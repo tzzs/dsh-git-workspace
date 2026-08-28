@@ -70,6 +70,12 @@ function fmtTime(s) {
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+function fmtDate(s) {
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return String(s)
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+}
+
 function repoWebUrl(remote) {
   if (!remote) return null
   if (remote.startsWith('http')) return remote.replace(/\.git$/, '')
@@ -106,6 +112,19 @@ function treeSize(node) {
   let n = node.files.length
   for (const d of node.dirs.values()) n += treeSize(d)
   return n
+}
+
+// Merge a chain of directories that each hold nothing but a single
+// child directory into one row (e.g. "client" + "panel" -> "client/panel"),
+// mirroring VS Code/GitLens folder compaction.
+function compactDir(dir) {
+  while (dir.files.length === 0 && dir.dirs.size === 1) {
+    const child = dir.dirs.values().next().value
+    dir.name = `${dir.name}/${child.name}`
+    dir.dirs = child.dirs
+    dir.files = child.files
+  }
+  for (const child of dir.dirs.values()) compactDir(child)
 }
 
 function DirNode({ dir, depth, onDispatch }) {
@@ -197,6 +216,10 @@ function fileStageControl(file, onDispatch) {
   )
 }
 
+function fileIconColor(status) {
+  return (STATUS_LETTER[status] && STATUS_LETTER[status].color) || 'var(--dsw-alias-label-caption)'
+}
+
 function FileTreeRow({ file, depth, onDispatch }) {
   const [open, setOpen] = React.useState(false)
   const rowStyle = { padding: `2px 6px 2px ${depth * 12 + 22}px`, gap: '5px' }
@@ -206,7 +229,7 @@ function FileTreeRow({ file, depth, onDispatch }) {
       { className: 'dgw-row', style: rowStyle },
       React.createElement(
         'span',
-        { style: { display: 'inline-flex', color: 'var(--dsw-alias-label-caption)', flex: 'none' } },
+        { style: { display: 'inline-flex', color: fileIconColor(file.status), flex: 'none' } },
         React.createElement(IconCodeOutline16, { size: 13 }),
       ),
       React.createElement(Code, { style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
@@ -244,7 +267,7 @@ function FileTreeRow({ file, depth, onDispatch }) {
       ),
       React.createElement(
         'span',
-        { style: { display: 'inline-flex', color: 'var(--dsw-alias-label-caption)', flex: 'none' } },
+        { style: { display: 'inline-flex', color: fileIconColor(file.status), flex: 'none' } },
         React.createElement(IconCodeOutline16, { size: 13 }),
       ),
       React.createElement(Code, { style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
@@ -528,6 +551,7 @@ function ChangesBody({ data, onDispatch }) {
     : null
   if (all.length > 0) {
     const tree = buildTree(all)
+    for (const child of tree.dirs.values()) compactDir(child)
     return React.createElement(
       'div',
       { style: { display: 'flex', flexDirection: 'column' } },
@@ -564,6 +588,7 @@ const GRAPH_LINE = 'var(--dsw-alias-border-l2)'
 
 function CommitGraphRow({ c, i, total, branchName, ahead, upstream, onDispatch }) {
   const isHead = i === 0
+  const [open, setOpen] = React.useState(isHead)
   const isLocal = i < ahead
   const isBoundary = Boolean(upstream) && i === ahead
   const isMerge = /^Merge\b/.test(c.message || '')
@@ -589,46 +614,83 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, onDispatch }
     dot.background = color
   }
   if (isHead) dot.boxShadow = `0 0 0 2px var(--dsw-alias-bg-layer-2), 0 0 0 3.5px ${color}`
+  const toggle = () => setOpen((v) => !v)
+  const meta = [c.author, c.date ? fmtDate(c.date) : null, c.shortSha].filter(Boolean).join(' · ')
   return React.createElement(
     'div',
-    { className: 'dgw-row', style: { display: 'flex', alignItems: 'stretch', gap: '8px', minHeight: '26px', padding: '0 6px 0 0' } },
-    React.createElement(
-      'span',
-      { style: { position: 'relative', width: '16px', flex: 'none' } },
-      i > 0
-        ? React.createElement('span', { style: { position: 'absolute', left: '7.5px', top: 0, height: '50%', width: '2px', background: GRAPH_LINE } })
-        : null,
-      i < total - 1
-        ? React.createElement('span', { style: { position: 'absolute', left: '7.5px', top: '50%', bottom: 0, width: '2px', background: GRAPH_LINE } })
-        : null,
-      React.createElement('span', { style: dot }),
-    ),
+    { style: { display: 'flex', flexDirection: 'column' } },
     React.createElement(
       'div',
-      { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 0' } },
+      {
+        className: 'dgw-row',
+        role: 'button',
+        tabIndex: 0,
+        title: 'Toggle commit details',
+        'aria-expanded': open,
+        onClick: toggle,
+        onKeyDown: (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            toggle()
+          }
+        },
+        style: { display: 'flex', alignItems: 'stretch', gap: '8px', minHeight: '26px', padding: '0 6px 0 0', cursor: 'pointer' },
+      },
       React.createElement(
         'span',
-        {
-          title: `${c.shortSha} · ${c.author}`,
-          style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-        },
-        (c.message || '').split('\n')[0],
+        { style: { position: 'relative', width: '16px', flex: 'none' } },
+        i > 0
+          ? React.createElement('span', { style: { position: 'absolute', left: '7.5px', top: 0, height: '50%', width: '2px', background: GRAPH_LINE } })
+          : null,
+        i < total - 1
+          ? React.createElement('span', { style: { position: 'absolute', left: '7.5px', top: '50%', bottom: 0, width: '2px', background: GRAPH_LINE } })
+          : null,
+        React.createElement('span', { style: dot }),
       ),
-      isHead && branchName ? React.createElement(Pill, { text: branchName, color: 'var(--dsw-alias-brand-primary)' }) : null,
-      isBoundary ? React.createElement(Pill, { text: upstream, color: 'var(--dsw-alias-state-warn-primary)' }) : null,
-    ),
-    onDispatch && c.sha
-      ? React.createElement(
-          'button',
+      React.createElement(
+        'div',
+        { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 0' } },
+        React.createElement(
+          'span',
           {
-            type: 'button',
-            className: 'dgw-linkicon',
-            title: 'View this commit’s diff',
-            'aria-label': 'View this commit’s diff',
-            style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', color: 'var(--dsw-alias-label-caption)' },
-            onClick: () => onDispatch({ name: 'git-show', args: { sha: c.sha } }),
+            title: `${c.shortSha} · ${c.author}`,
+            style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
           },
-          React.createElement(IconCodeOutline16, { size: 13 }),
+          (c.message || '').split('\n')[0],
+        ),
+        isHead && branchName ? React.createElement(Pill, { text: branchName, color: 'var(--dsw-alias-brand-primary)' }) : null,
+        isBoundary ? React.createElement(Pill, { text: upstream, color: 'var(--dsw-alias-state-warn-primary)' }) : null,
+      ),
+      onDispatch && c.sha
+        ? React.createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'dgw-linkicon',
+              title: 'View this commit’s diff',
+              'aria-label': 'View this commit’s diff',
+              style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', color: 'var(--dsw-alias-label-caption)' },
+              onClick: (e) => {
+                if (e) e.stopPropagation()
+                onDispatch({ name: 'git-show', args: { sha: c.sha } })
+              },
+            },
+            React.createElement(IconCodeOutline16, { size: 13 }),
+          )
+        : null,
+    ),
+    open && meta
+      ? React.createElement(
+          'div',
+          {
+            style: {
+              fontFamily: 'var(--dsw-font-family-code)',
+              fontSize: '11px',
+              color: 'var(--dsw-alias-label-caption)',
+              padding: '0 6px 6px 24px',
+            },
+          },
+          meta,
         )
       : null,
   )

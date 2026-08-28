@@ -275,8 +275,15 @@ Source Control tab:
   while a pull request already exists), read-only sync entries (Pull,
   Fast-forward, Sync, Rebase from upstream, Fetch, Publish), and Discard
   Changes (`git-discard`, the hard-reset command with confirm:true built in).
+- **Changes tree** — directory chains that hold nothing but a single child
+  directory collapse into one row (e.g. `src` → `client` → `panel` renders as
+  `src/client/panel`), mirroring VS Code/GitLens folder compaction; each
+  file's icon is colored by its git status (modified/added/deleted/etc.)
+  instead of a flat caption color.
 - **Commit diff** — each row in the "Committed on branch" / "Commits" cards
-  carries a small icon button that dispatches `/git-show {sha}` for that
+  is clickable and expands to show author, date, and short SHA (the HEAD
+  commit starts expanded); a small icon button on the row, which does not
+  trigger the row's expand/collapse, dispatches `/git-show {sha}` for that
   commit.
 
 Pull Request tab:
