@@ -23,6 +23,8 @@ const MAX_INLINE_DIFF_BYTES = 64 * 1024
 const MAX_INLINE_HUNKS_PER_FILE = 30
 const MAX_INLINE_LINES = 200
 const MAX_UNTRACKED_PREVIEW_LINES = 200
+const COMMITS_SAMPLE_LIMIT = 30
+const MAX_COMPARISON_FILES = 200
 
 function parseHunks(patch: string): Hunk[] {
   const lines = patch.split('\n')
@@ -213,6 +215,16 @@ export interface WorkspaceResult {
     base: string | null
     ahead: number
     behind: number
+    files?: Array<{
+      path: string
+      oldPath: string | null
+      status: GitFile['status']
+      staged: boolean
+      additions?: number
+      deletions?: number
+      diffOmitted?: 'binary'
+    }>
+    filesTruncated?: boolean
   }
   commits: {
     ahead: number
@@ -230,6 +242,7 @@ export interface WorkspaceResult {
     title: string
     state: string
     draft: boolean
+    merged: boolean
     url: string
     updatedAt?: string | null
     comments?: WorkspaceComment[]
@@ -277,7 +290,7 @@ export async function gitWorkspace(
 
   const [s, commits, pr, ci, branches, stash] = await Promise.all([
     gitStatus(r.root),
-    gitCommits({ limit: 10 }, r.root),
+    gitCommits({ limit: COMMITS_SAMPLE_LIMIT }, r.root),
     githubPr(r.root),
     githubCi({}, r.root),
     gitBranches(r.root),
@@ -287,16 +300,37 @@ export async function gitWorkspace(
   if ('error' in s) return s
 
   const currentBranch = s.branch.name
-  let comparison: { base: string | null; ahead: number; behind: number } = {
+  let comparison: WorkspaceResult['comparison'] = {
     base: null,
     ahead: s.branch.ahead,
     behind: s.branch.behind,
   }
 
-  if (currentBranch && currentBranch !== 'main' && currentBranch !== 'master') {
-    const cmp = await gitCompare({ base: 'main', head: currentBranch }, r.root)
+  // Prefer the branch's own remote-tracking ref (already fetched, always
+  // current) as the diff base; fall back to main/master only when the
+  // branch has never been pushed.
+  const compareBase =
+    s.branch.upstream ??
+    (currentBranch && currentBranch !== 'main' && currentBranch !== 'master' ? 'main' : null)
+
+  if (compareBase && currentBranch && compareBase !== currentBranch) {
+    const cmp = await gitCompare({ base: compareBase, head: currentBranch }, r.root)
     if (!('error' in cmp)) {
-      comparison = { base: 'main', ahead: cmp.ahead, behind: cmp.behind }
+      comparison = {
+        base: compareBase,
+        ahead: s.branch.upstream === compareBase ? s.branch.ahead : cmp.ahead,
+        behind: s.branch.upstream === compareBase ? s.branch.behind : cmp.behind,
+        files: cmp.files.slice(0, MAX_COMPARISON_FILES).map((f) => ({
+          path: f.path,
+          oldPath: f.oldPath,
+          status: f.status as GitFile['status'],
+          staged: false,
+          additions: f.additions,
+          deletions: f.deletions,
+          ...(f.binary ? { diffOmitted: 'binary' as const } : {}),
+        })),
+        ...(cmp.files.length > MAX_COMPARISON_FILES ? { filesTruncated: true } : {}),
+      }
     }
   }
 
@@ -309,6 +343,7 @@ export async function gitWorkspace(
           title: pr.pullRequests[0].title,
           state: pr.pullRequests[0].state,
           draft: pr.pullRequests[0].draft,
+          merged: pr.pullRequests[0].merged,
           url: pr.pullRequests[0].url,
           updatedAt: pr.pullRequests[0].updatedAt ?? null,
         }

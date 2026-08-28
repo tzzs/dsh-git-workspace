@@ -33,12 +33,13 @@ export interface WorkspaceMeta {
   stashCount?: number
   additionsTotal?: number
   deletionsTotal?: number
-  comparison?: { base: string | null; ahead: number; behind: number } | null
+  comparison?: { base: string | null; ahead: number; behind: number; files?: FileMeta[]; filesTruncated?: boolean } | null
   pullRequest: {
     number: number
     title: string
     state: string
     draft: boolean
+    merged?: boolean
     url: string
     updatedAt?: string | null
     comments?: WorkspaceCommentMeta[]
@@ -88,7 +89,15 @@ export interface DiffMeta {
   files: DiffFileMeta[]
 }
 
+export interface CommitFileMeta {
+  path: string
+  status: string
+  additions: number
+  deletions: number
+}
+
 export interface CommitMeta {
+  sha: string
   shortSha: string
   message: string
   author: string
@@ -96,6 +105,7 @@ export interface CommitMeta {
   additions: number
   deletions: number
   fileCount: number
+  files: CommitFileMeta[]
 }
 
 export interface CheckMeta {
@@ -207,6 +217,7 @@ function diffFileMeta(f: DiffFile): DiffFileMeta {
 
 function commitMeta(c: CommitSummary): CommitMeta {
   return {
+    sha: c.sha,
     shortSha: c.shortSha,
     message: c.message,
     author: c.author,
@@ -214,6 +225,12 @@ function commitMeta(c: CommitSummary): CommitMeta {
     additions: c.files?.additions ?? 0,
     deletions: c.files?.deletions ?? 0,
     fileCount: c.files?.count ?? 0,
+    files: (c.files?.list ?? []).map((f) => ({
+      path: f.path,
+      status: f.status,
+      additions: f.additions,
+      deletions: f.deletions,
+    })),
   }
 }
 
@@ -239,12 +256,13 @@ export function toWorkspaceMeta(w: {
   stashCount?: number
   additionsTotal?: number
   deletionsTotal?: number
-  comparison?: { base: string | null; ahead: number; behind: number } | null
+  comparison?: { base: string | null; ahead: number; behind: number; files?: FileMeta[]; filesTruncated?: boolean } | null
   pullRequest: {
     number: number
     title: string
     state: string
     draft: boolean
+    merged?: boolean
     url: string
     updatedAt?: string | null
     comments?: WorkspaceCommentMeta[]

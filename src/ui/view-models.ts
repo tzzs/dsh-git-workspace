@@ -83,6 +83,7 @@ export interface CommitVm {
   additions: number
   deletions: number
   fileCount: number
+  files: Array<{ path: string; status: string; additions: number; deletions: number }>
 }
 
 export function toCommitVm(c: CommitSummary): CommitVm {
@@ -95,6 +96,7 @@ export function toCommitVm(c: CommitSummary): CommitVm {
     additions: c.files?.additions ?? 0,
     deletions: c.files?.deletions ?? 0,
     fileCount: c.files?.count ?? 0,
+    files: c.files?.list ?? [],
   }
 }
 

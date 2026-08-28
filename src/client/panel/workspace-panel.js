@@ -8,6 +8,7 @@ import {
   IconCodeOutline16,
   IconFolderOpenOutline16,
   IconPlusOutline16,
+  IconRefreshOutline14,
   IconRightUpOutline16,
   IconWarningOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -81,6 +82,76 @@ function repoWebUrl(remote) {
   if (remote.startsWith('http')) return remote.replace(/\.git$/, '')
   const m = remote.match(/^git@([^:]+):(.+)$/)
   return m ? `https://${m[1]}/${m[2].replace(/\.git$/, '')}` : null
+}
+
+// Small inline icons kept local (rather than imported) so their exact size
+// stays in sync with the 11px text they sit next to — the host icon set
+// only ships fixed 13/14/16px glyphs, which read as oversized here.
+function ArrowIcon({ size = 10 }) {
+  return React.createElement(
+    'svg',
+    { width: size, height: size, viewBox: '0 0 16 16', fill: 'none', style: { flex: 'none', display: 'inline-block' } },
+    React.createElement('path', {
+      d: 'M2.5 8h10.5m0 0L9.5 4.5M13 8l-3.5 3.5',
+      stroke: 'currentColor',
+      strokeWidth: 1.6,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+    }),
+  )
+}
+
+function SearchIcon({ size = 13 }) {
+  return React.createElement(
+    'svg',
+    { width: size, height: size, viewBox: '0 0 16 16', fill: 'none', style: { flex: 'none', display: 'inline-block' } },
+    React.createElement('circle', { cx: 7, cy: 7, r: 4.25, stroke: 'currentColor', strokeWidth: 1.4 }),
+    React.createElement('path', { d: 'M10.4 10.4 14 14', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round' }),
+  )
+}
+
+// A button-shaped control that is safe to nest inside `Section`'s header
+// <button> (a real <button> there gets reparented out by the HTML parser).
+function IconActionBtn({ title, onClick, tone, children }) {
+  return React.createElement(
+    'span',
+    {
+      role: 'button',
+      tabIndex: 0,
+      className: 'dgw-linkicon',
+      title,
+      'aria-label': title,
+      style: { cursor: 'pointer', color: tone },
+      onClick: (e) => {
+        e.stopPropagation()
+        onClick()
+      },
+      onKeyDown: (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          e.stopPropagation()
+          onClick()
+        }
+      },
+    },
+    children,
+  )
+}
+
+function prStateColor(pr) {
+  if (!pr) return 'var(--dsw-alias-label-secondary)'
+  if (pr.draft) return 'var(--dsw-alias-state-warn-primary)'
+  if (pr.merged) return 'var(--dsw-alias-label-secondary)'
+  const s = String(pr.state || '').toLowerCase()
+  if (s === 'open') return 'var(--dsw-alias-state-success-primary)'
+  if (s === 'closed') return 'var(--dsw-alias-state-error-primary)'
+  return 'var(--dsw-alias-label-secondary)'
+}
+
+function prStateLabel(pr) {
+  if (pr.draft) return 'DRAFT'
+  if (pr.merged) return 'MERGED'
+  return String(pr.state || 'open').toUpperCase()
 }
 
 function FileStats({ additions, deletions }) {
@@ -160,6 +231,75 @@ function DirNode({ dir, depth, onDispatch }) {
     ),
     open ? React.createElement(TreeNodeRows, { node: dir, depth: depth + 1, onDispatch }) : null,
   )
+}
+
+function filterFiles(files, search) {
+  const q = (search || '').trim().toLowerCase()
+  if (!q) return files
+  return files.filter((f) => f.path.toLowerCase().includes(q))
+}
+
+// Shared by the "Changes" tree and the read-only "Committed on branch"
+// tree — pass `onDispatch: null` for the latter to hide stage controls.
+function FileTree({ files, onDispatch, viewMode = 'tree' }) {
+  if (files.length === 0) return null
+  if (viewMode === 'list') {
+    const sorted = [...files].sort((a, b) => a.path.localeCompare(b.path))
+    return React.createElement(
+      'div',
+      { style: { display: 'flex', flexDirection: 'column' } },
+      sorted.map((f) =>
+        React.createElement(FileTreeRow, {
+          key: f.path + (f.staged ? ':staged' : ''),
+          file: { ...f, name: f.path },
+          depth: 0,
+          onDispatch,
+        }),
+      ),
+    )
+  }
+  const tree = buildTree(files)
+  for (const child of tree.dirs.values()) compactDir(child)
+  return React.createElement(TreeNodeRows, { node: tree, depth: 0, onDispatch })
+}
+
+function ViewModeToggle({ mode, onChange }) {
+  const btn = (id, label) =>
+    React.createElement(
+      'span',
+      {
+        key: id,
+        role: 'button',
+        tabIndex: 0,
+        'aria-pressed': mode === id,
+        title: `${label} view`,
+        onClick: (e) => {
+          e.stopPropagation()
+          onChange(id)
+        },
+        onKeyDown: (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            e.stopPropagation()
+            onChange(id)
+          }
+        },
+        style: {
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '2px 8px',
+          borderRadius: '5px',
+          fontSize: '10px',
+          fontWeight: 600,
+          cursor: 'pointer',
+          fontFamily: 'var(--dsw-font-family)',
+          background: mode === id ? 'var(--dsw-alias-interactive-bg-hover-solid)' : 'none',
+          color: mode === id ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-caption)',
+        },
+      },
+      label,
+    )
+  return React.createElement('span', { style: { display: 'inline-flex', gap: '2px', flex: 'none' } }, btn('tree', 'Tree'), btn('list', 'List'))
 }
 
 function TreeNodeRows({ node, depth, onDispatch }) {
@@ -305,18 +445,19 @@ function countDirty(data) {
   return Array.isArray(data.files) ? data.files.length : 0
 }
 
-function BranchHeader({ data, refreshing, onOpenPr }) {
+function BranchHeader({ data, refreshing, onOpenPr, searchOpen, onToggleSearch, search, onSearchChange }) {
   const branch = data.branch || {}
   const pr = data.pullRequest
   const totalA = typeof data.additionsTotal === 'number' ? data.additionsTotal : null
   const totalD = typeof data.deletionsTotal === 'number' ? data.deletionsTotal : null
   const link = (pr && pr.url) || repoWebUrl(data.repository && data.repository.remote)
+  const compareTarget = (data.comparison && data.comparison.base) || branch.upstream || null
   return React.createElement(
     'div',
     { style: { padding: '10px 2px 8px', display: 'flex', flexDirection: 'column', gap: '1px', flex: 'none' } },
     React.createElement(
       'div',
-      { style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '16px' } },
+      { style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '18px' } },
       pr
         ? React.createElement(
             'a',
@@ -328,16 +469,47 @@ function BranchHeader({ data, refreshing, onOpenPr }) {
             },
             React.createElement(
               'span',
-              { style: { display: 'inline-flex', color: 'var(--dsw-alias-state-success-primary)', flex: 'none' } },
+              { style: { display: 'inline-flex', color: prStateColor(pr), flex: 'none' }, title: prStateLabel(pr) },
               React.createElement(IconBranchOutline16, { size: 12 }),
             ),
             React.createElement('span', { style: { fontSize: '11px', fontWeight: 600 } }, `PR #${pr.number}`),
           )
-        : React.createElement(
+        : null,
+      React.createElement('span', { style: { flex: '1 1 auto' } }),
+      onToggleSearch
+        ? React.createElement(
+            IconActionBtn,
+            { title: searchOpen ? 'Close search' : 'Search files', onClick: onToggleSearch, tone: searchOpen ? 'var(--dsw-alias-brand-primary)' : undefined },
+            React.createElement(SearchIcon, { size: 13 }),
+          )
+        : null,
+    ),
+    searchOpen
+      ? React.createElement('div', { style: { padding: '4px 0 2px' } },
+          React.createElement('input', {
+            className: 'dgw-textarea',
+            style: { minHeight: '26px', height: '26px', width: '100%' },
+            placeholder: 'Search files by name…',
+            'aria-label': 'Search files by name',
+            autoFocus: true,
+            value: search || '',
+            onChange: (e) => onSearchChange && onSearchChange(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Escape') { e.preventDefault(); onToggleSearch && onToggleSearch() } },
+          }),
+        )
+      : null,
+    React.createElement(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '18px' } },
+      React.createElement(Code, { style: { fontSize: '13px', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, branch.name || 'detached'),
+      branch.upstream
+        ? React.createElement(
             'span',
-            { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', fontWeight: 500 } },
-            (data.repository && data.repository.name) || 'Working tree',
-          ),
+            { style: { display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--dsw-alias-label-caption)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            React.createElement(ArrowIcon, { size: 9 }),
+            branch.upstream,
+          )
+        : null,
       React.createElement('span', { style: { flex: '1 1 auto' } }),
       totalA != null && (totalA > 0 || totalD > 0)
         ? React.createElement(
@@ -351,20 +523,14 @@ function BranchHeader({ data, refreshing, onOpenPr }) {
     React.createElement(
       'div',
       { style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '18px' } },
-      React.createElement(Code, { style: { fontSize: '13px', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, branch.name || 'detached'),
-    ),
-    React.createElement(
-      'div',
-      { style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '18px' } },
-      React.createElement(
-        'span',
-        { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-        branch.upstream
-          ? `→ ${branch.upstream}`
-          : data.comparison && data.comparison.base
-            ? `→ ${data.comparison.base} ↑${data.comparison.ahead} ↓${data.comparison.behind}`
-            : 'no upstream',
-      ),
+      compareTarget
+        ? React.createElement(
+            'span',
+            { style: { display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            React.createElement(ArrowIcon, { size: 9 }),
+            compareTarget,
+          )
+        : React.createElement('span', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' } }, 'no upstream'),
       React.createElement('span', { style: { flex: '1 1 auto' } }),
       branch.ahead > 0
         ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `↑${branch.ahead}`)
@@ -539,8 +705,18 @@ function CommitBox({ onDispatch, data }) {
   )
 }
 
-function ChangesBody({ data, onDispatch }) {
+function CleanState({ text }) {
+  return React.createElement(
+    'div',
+    { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '7px', padding: '22px 0 14px', width: '100%' } },
+    React.createElement(CircleIcon, { tone: 'success', size: 24 }, React.createElement(IconCheckOutline14, { size: 13 })),
+    React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, text),
+  )
+}
+
+function ChangesBody({ data, onDispatch, search, viewMode }) {
   const all = Array.isArray(data.files) ? data.files : []
+  const filtered = filterFiles(all, search)
   const bulk = onDispatch && !data.clean
     ? React.createElement(
         Row,
@@ -550,13 +726,13 @@ function ChangesBody({ data, onDispatch }) {
       )
     : null
   if (all.length > 0) {
-    const tree = buildTree(all)
-    for (const child of tree.dirs.values()) compactDir(child)
     return React.createElement(
       'div',
       { style: { display: 'flex', flexDirection: 'column' } },
       bulk,
-      React.createElement(TreeNodeRows, { node: tree, depth: 0, onDispatch }),
+      filtered.length > 0
+        ? React.createElement(FileTree, { files: filtered, onDispatch, viewMode })
+        : React.createElement(Muted, null, `No files match “${search}”.`),
       data.filesTruncated
         ? React.createElement(
             'div',
@@ -576,11 +752,11 @@ function ChangesBody({ data, onDispatch }) {
   }
   return React.createElement(
     'div',
-    { style: { display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } },
+    { style: { display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start', width: '100%' } },
     bulk,
     chips.length ? React.createElement(Row, null, chips) : null,
     !data.clean ? React.createElement(Muted, null, 'File list unavailable in this session’s data — refresh to fetch it.') : null,
-    data.clean && !chips.length ? React.createElement(Stat, { text: '✓ clean', color: 'var(--dsw-alias-state-success-primary)' }) : null,
+    data.clean && !chips.length ? React.createElement(CleanState, { text: 'No changes — your working tree is clean.' }) : null,
   )
 }
 
@@ -679,20 +855,52 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, onDispatch }
           )
         : null,
     ),
-    open && meta
+    open
       ? React.createElement(
-          'div',
-          {
-            style: {
-              fontFamily: 'var(--dsw-font-family-code)',
-              fontSize: '11px',
-              color: 'var(--dsw-alias-label-caption)',
-              padding: '0 6px 6px 24px',
-            },
-          },
-          meta,
+          React.Fragment,
+          null,
+          meta
+            ? React.createElement(
+                'div',
+                {
+                  style: {
+                    fontFamily: 'var(--dsw-font-family-code)',
+                    fontSize: '11px',
+                    color: 'var(--dsw-alias-label-caption)',
+                    padding: '0 6px 4px 24px',
+                  },
+                },
+                meta,
+              )
+            : null,
+          Array.isArray(c.files) && c.files.length > 0
+            ? React.createElement(
+                'div',
+                { style: { padding: '0 0 4px' } },
+                c.files.map((f) => React.createElement(CommitFileRow, { key: f.path, file: f })),
+              )
+            : null,
         )
       : null,
+  )
+}
+
+function CommitFileRow({ file }) {
+  return React.createElement(
+    Row,
+    { className: 'dgw-row', style: { padding: '1px 6px 1px 24px', gap: '6px' } },
+    React.createElement(
+      'span',
+      { style: { display: 'inline-flex', color: fileIconColor(file.status), flex: 'none' } },
+      React.createElement(IconCodeOutline16, { size: 12 }),
+    ),
+    React.createElement(
+      Code,
+      { style: { fontSize: '11px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } },
+      file.path,
+    ),
+    React.createElement(FileStats, { additions: file.additions, deletions: file.deletions }),
+    React.createElement(StatusChip, { status: file.status }),
   )
 }
 
@@ -1071,12 +1279,8 @@ function PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSample
     )
   }
   const state = (pr.state || 'open').toUpperCase()
-  const stateText = pr.draft ? 'DRAFT' : state
-  const stateColor = pr.draft
-    ? 'var(--dsw-alias-state-warn-primary)'
-    : state === 'OPEN'
-      ? 'var(--dsw-alias-state-success-primary)'
-      : 'var(--dsw-alias-label-secondary)'
+  const stateText = prStateLabel(pr)
+  const stateColor = prStateColor(pr)
   const comments = Array.isArray(pr.comments) ? pr.comments : []
   const additions = typeof data.additionsTotal === 'number' ? data.additionsTotal : 0
   const deletions = typeof data.deletionsTotal === 'number' ? data.deletionsTotal : 0
@@ -1148,32 +1352,70 @@ function PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSample
   )
 }
 
-function ScTab({ data, refreshing, onDispatch, onOpenPr }) {
+function ScTab({ data, refreshing, onDispatch, onOpenPr, onRefresh, canRefresh }) {
   const dirty = countDirty(data)
+  const hasFiles = Array.isArray(data.files) && data.files.length > 0
+  const [searchOpen, setSearchOpen] = React.useState(false)
+  const [search, setSearch] = React.useState('')
+  const [viewMode, setViewMode] = React.useState('tree')
+  const toggleSearch = () =>
+    setSearchOpen((v) => {
+      if (v) setSearch('')
+      return !v
+    })
   const ahead = typeof data.commitsAhead === 'number' ? data.commitsAhead : (data.branch && data.branch.ahead) || 0
-  const branchCommits = Array.isArray(data.commits) ? data.commits.slice(0, ahead) : []
+  const cmpFiles = Array.isArray(data.comparison && data.comparison.files) ? data.comparison.files : []
+  const filteredCmpFiles = filterFiles(cmpFiles, search)
+  const commits = Array.isArray(data.commits) ? data.commits : []
   return React.createElement(
     React.Fragment,
     null,
-    React.createElement(BranchHeader, { data, refreshing, onOpenPr }),
+    React.createElement(BranchHeader, {
+      data,
+      refreshing,
+      onOpenPr,
+      searchOpen,
+      onToggleSearch: toggleSearch,
+      search,
+      onSearchChange: setSearch,
+    }),
     !data.clean && onDispatch ? React.createElement(CommitBox, { onDispatch, data }) : null,
     React.createElement(
       Section,
-      { title: 'Changes', count: dirty || null, defaultOpen: true },
-      React.createElement(ChangesBody, { data, onDispatch }),
+      {
+        title: 'Changes',
+        count: dirty || null,
+        defaultOpen: true,
+        right: hasFiles ? React.createElement(ViewModeToggle, { mode: viewMode, onChange: setViewMode }) : null,
+      },
+      React.createElement(ChangesBody, { data, onDispatch, search, viewMode }),
     ),
     React.createElement(
       Section,
-      { title: 'Committed on branch', count: ahead || null, defaultOpen: true },
-      branchCommits.length > 0
-        ? React.createElement(CommitGraph, { commits: branchCommits, branch: data.branch, onDispatch })
+      { title: 'Committed on branch', count: cmpFiles.length || null, defaultOpen: true },
+      cmpFiles.length > 0
+        ? filteredCmpFiles.length > 0
+          ? React.createElement(FileTree, { files: filteredCmpFiles, onDispatch: null, viewMode: 'tree' })
+          : React.createElement(Muted, null, `No files match “${search}”.`)
         : React.createElement(Muted, null, ahead > 0 ? 'Commit details are unavailable.' : 'No commits ahead of the upstream branch.'),
     ),
-    data.commits && data.commits.length > 0
+    commits.length > 0
       ? React.createElement(
           Section,
-          { title: 'Commits', count: data.commits.length, defaultOpen: true },
-          React.createElement(CommitGraph, { commits: data.commits, branch: data.branch, onDispatch }),
+          {
+            title: 'Commits',
+            count: commits.length,
+            defaultOpen: true,
+            right:
+              onRefresh && canRefresh !== false
+                ? React.createElement(
+                    IconActionBtn,
+                    { title: 'Refresh', onClick: onRefresh, tone: refreshing ? 'var(--dsw-alias-brand-primary)' : undefined },
+                    React.createElement(IconRefreshOutline14, { size: 13 }),
+                  )
+                : null,
+          },
+          React.createElement(CommitGraph, { commits, branch: data.branch, onDispatch }),
         )
       : null,
   )
@@ -1283,7 +1525,9 @@ export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRef
           )
         : null,
       React.createElement(TabBar, { tab, setTab, prHint: data.pullRequest ? (prUnresolved || null) : null }),
-      tab === 'pr' ? PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSampled }) : ScTab({ data, refreshing, onDispatch, onOpenPr: () => setTab('pr') }),
+      tab === 'pr'
+        ? PrTab({ data, refreshing, canRefresh, onRefresh, onDispatch, autoSampled })
+        : ScTab({ data, refreshing, onDispatch, onOpenPr: () => setTab('pr'), onRefresh, canRefresh }),
     )
   }
 

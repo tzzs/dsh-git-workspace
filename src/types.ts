@@ -41,6 +41,12 @@ export interface CommitSummary {
     count: number
     additions: number
     deletions: number
+    list?: Array<{
+      path: string
+      status: GitFileStatus
+      additions: number
+      deletions: number
+    }>
   }
 }
 

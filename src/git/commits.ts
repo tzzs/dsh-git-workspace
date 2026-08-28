@@ -8,7 +8,60 @@ import {
   DEFAULT_COMMIT_LIMIT,
   MAX_COMMIT_LIMIT,
 } from './safety.js'
-import type { Result, CommitSummary } from '../types.js'
+import type { Result, CommitSummary, GitFileStatus } from '../types.js'
+
+const MAX_COMMIT_FILES = 50
+
+const RAW_STATUS: Record<string, GitFileStatus> = {
+  A: 'added',
+  D: 'deleted',
+  M: 'modified',
+  T: 'modified',
+  U: 'modified',
+}
+
+function parseCommitFiles(stdout: string): {
+  count: number
+  additions: number
+  deletions: number
+  list: Array<{ path: string; status: GitFileStatus; additions: number; deletions: number }>
+} {
+  const tokens = stdout.split('\0')
+  let i = 0
+  const raw: Array<{ status: GitFileStatus; path: string }> = []
+  while (i < tokens.length && tokens[i].startsWith(':')) {
+    const header = tokens[i]
+    i++
+    const path = tokens[i]
+    i++
+    if (path === undefined) break
+    const m = header.match(/\s([A-Z])\d*$/)
+    raw.push({ status: (m && RAW_STATUS[m[1]]) || 'modified', path })
+  }
+  const stats = new Map<string, { additions: number; deletions: number }>()
+  for (; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (!token) continue
+    const firstTab = token.indexOf('\t')
+    if (firstTab === -1) continue
+    const secondTab = token.indexOf('\t', firstTab + 1)
+    if (secondTab === -1) continue
+    const a = token.slice(0, firstTab)
+    const d = token.slice(firstTab + 1, secondTab)
+    const path = token.slice(secondTab + 1)
+    if (a === '-') continue
+    stats.set(path, { additions: Number(a) || 0, deletions: Number(d) || 0 })
+  }
+  let additions = 0
+  let deletions = 0
+  const list = raw.map((f) => {
+    const st = stats.get(f.path) || { additions: 0, deletions: 0 }
+    additions += st.additions
+    deletions += st.deletions
+    return { path: f.path, status: f.status, additions: st.additions, deletions: st.deletions }
+  })
+  return { count: list.length, additions, deletions, list: list.slice(0, MAX_COMMIT_FILES) }
+}
 
 export interface CommitsOptions {
   limit?: number
@@ -79,11 +132,13 @@ export async function gitCommits(
         if (input.path) {
           return c
         }
-        const numstat = await command(
+        const shown = await command(
           'git',
           [
             'show',
             '--format=',
+            '--raw',
+            '--no-renames',
             '--numstat',
             '-z',
             c.sha,
@@ -91,26 +146,10 @@ export async function gitCommits(
           ],
           r.root,
         ).catch(() => null)
-        if (!numstat) return c
-        let count = 0
-        let additions = 0
-        let deletions = 0
-        for (const token of numstat.stdout.split('\0')) {
-          if (!token) continue
-          const firstTab = token.indexOf('\t')
-          if (firstTab === -1) continue
-          const secondTab = token.indexOf('\t', firstTab + 1)
-          if (secondTab === -1) continue
-          const a = token.slice(0, firstTab)
-          const d = token.slice(firstTab + 1, secondTab)
-          if (a === '-') continue
-          count++
-          additions += Number(a) || 0
-          deletions += Number(d) || 0
-        }
+        if (!shown) return c
         return {
           ...c,
-          files: { count, additions, deletions },
+          files: parseCommitFiles(shown.stdout),
         }
       }),
     )
