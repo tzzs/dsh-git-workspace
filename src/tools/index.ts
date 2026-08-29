@@ -18,6 +18,7 @@ import { gitPush } from '../git/push.js'
 import { gitCheckout } from '../git/checkout.js'
 import { gitMerge } from '../git/merge.js'
 import { gitReset } from '../git/reset.js'
+import { gitDiscardPaths } from '../git/discard_paths.js'
 import { githubPr } from '../github/pr.js'
 import { githubPrCreate } from '../github/pr_create.js'
 import { githubPrDiff } from '../github/pr_diff.js'
@@ -58,6 +59,7 @@ export {
   gitCheckout,
   gitMerge,
   gitReset,
+  gitDiscardPaths,
   githubPr,
   githubPrCreate,
   githubPrDiff,

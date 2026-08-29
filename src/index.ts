@@ -28,6 +28,7 @@ import {
   gitCheckout,
   gitMerge,
   gitReset,
+  gitDiscardPaths,
   githubPr,
   githubPrCreate,
   githubPrDiff,
@@ -832,6 +833,43 @@ export function apply(ctx: {
             result.content,
           )
         return genericResult('Reset', result.content)
+      },
+    },
+  })
+
+  // ---- git_discard_paths --------------------------------------------------
+  register(ctx, {
+    name: 'git_discard_paths',
+    description:
+      'Write tool. Permanently reverts tracked changes and removes untracked files under the given paths (git restore + git clean, scoped — unlike git_reset mode:\'hard\' which discards the whole repository). Requires confirm:true.',
+    parameters: {
+      paths: { type: 'array', items: { type: 'string' } },
+      confirm: bool,
+    },
+    execute: (a) => gitDiscardPaths(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`discard failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as { discarded?: string[] }
+      const discarded = v.discarded ?? []
+      return text(
+        discarded.length
+          ? `Discarded changes in ${discarded.length} path(s):\n${discarded.map((p) => `- ${p}`).join('\n')}`
+          : 'Nothing discarded.',
+      )
+    },
+    presenters: {
+      presentCall: () => genericCall('Discard changes'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Discard') ?? 'Discard',
+            result.content,
+          )
+        return genericResult('Discard', result.content)
       },
     },
   })

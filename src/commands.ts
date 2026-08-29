@@ -9,6 +9,7 @@ import type {BranchCreateOptions} from './git/branch_create.js'
 import type {CheckoutOptions} from './git/checkout.js'
 import type {MergeOptions} from './git/merge.js'
 import type {ResetOptions} from './git/reset.js'
+import type {DiscardPathsOptions} from './git/discard_paths.js'
 import type {PrCreateOptions} from './github/pr_create.js'
 import type {PrMergeOptions} from './github/pr_merge.js'
 import type {PrCloseOptions} from './github/pr_close.js'
@@ -45,6 +46,7 @@ import {
   gitCheckout,
   gitMerge,
   gitReset,
+  gitDiscardPaths,
   githubPr,
   githubPrCreate,
   githubPrDiff,
@@ -263,6 +265,7 @@ export async function installGitCommands(ctx: Pick<Context, 'inject'>): Promise<
       const reset: ResetOptions = {mode: 'hard', ref: 'HEAD', confirm: true}
       return await gitReset(reset, dir)
     }, 'git-discard', 'Destructive write command. Discard all uncommitted index and work-tree changes by hard-resetting to HEAD.')
+    toolCommand<DiscardPathsOptions>((input, dir) => gitDiscardPaths({...input, confirm: true}, dir), 'git-discard-paths', 'Destructive write command. Discard uncommitted changes under the given paths only (confirm:true baked in — the panel confirms before dispatching).')
     toolCommand<Record<string, never>>((_, dir) => gitFetch(dir), 'git-fetch', 'Read-only network command. Fetch all configured remotes and prune stale remote-tracking refs.')
     toolCommand<Record<string, never>>((_, dir) => gitPull(dir), 'git-pull', 'Write command. Fetch and fast-forward the current branch to its configured upstream.')
     toolCommand<Record<string, never>>((_, dir) => gitFastForward(dir), 'git-fast-forward', 'Write command. Fast-forward the current branch to its configured upstream.')

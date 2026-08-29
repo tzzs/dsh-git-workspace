@@ -17,6 +17,23 @@ async function fixture(){const cwd=await mkdtemp(join(tmpdir(),'dsh-git-'));awai
  test('remote parser supports HTTPS, SSH and ssh URL',()=>{for(const [url,owner,repo] of [['https://github.com/a/b.git','a','b'],['git@github.com:a/b.git','a','b'],['ssh://git@github.com/a/b.git','a','b']])assert.deepEqual(parseGitRemote(url),{host:'github.com',owner,repository:repo})})
 test('non repository returns structured error',async()=>{const cwd=await mkdtemp(join(tmpdir(),'dsh-nonrepo-'));try{const r=await gitStatus(cwd);assert.equal(r.error.code,'NOT_A_GIT_REPOSITORY')}finally{await rm(cwd,{recursive:true,force:true})}})
 test('status, staged, untracked, diff and committed files',async()=>{const cwd=await fixture();try{await writeFile(join(cwd,'file.txt'),'one\ntwo\n');await writeFile(join(cwd,'new file.txt'),'new\n');let r=await gitStatus(cwd);assert.equal(r.files.length,2);assert.equal(r.files.find(x=>x.path==='file.txt').status,'modified');await git(cwd,['add','file.txt']);r=await gitStatus(cwd);assert.equal(r.files.find(x=>x.path==='file.txt').staged,true);const staged=await gitFiles('staged',cwd);assert.equal(staged.files.length,1);const committed=await gitFiles('committed',cwd);assert.deepEqual(committed.files.map(x=>x.path),['file.txt']);const d=await gitDiff({path:'file.txt',staged:true},cwd);assert.equal(d.files[0].additions,1);assert.match(d.files[0].hunks[0].lines.join('\n'),/\+two/);const c=await gitCommits({limit:1},cwd);assert.equal(c.commits[0].message,'initial');const ws=await gitWorkspace(cwd);assert.equal(ws.changes.untracked,1);assert.ok(Array.isArray(ws.files)&&ws.files.some(x=>x.path==='new file.txt'));assert.equal(typeof ws.stashCount,'number');assert.ok(Array.isArray(ws.branches))}finally{await rm(cwd,{recursive:true,force:true})}})
+test('an untracked directory lists its individual files instead of collapsing to one "dir/" entry, honoring .gitignore', async () => {
+  const cwd = await fixture()
+  try {
+    await mkdir(join(cwd, 'newdir'))
+    await writeFile(join(cwd, 'newdir', 'a.txt'), 'a\n')
+    await writeFile(join(cwd, 'newdir', 'b.txt'), 'b\n')
+    await writeFile(join(cwd, '.gitignore'), 'newdir/b.txt\n')
+    const r = await gitStatus(cwd)
+    const paths = r.files.map((f) => f.path)
+    assert.ok(paths.includes('newdir/a.txt'), 'the untracked file inside the directory is listed by its own path')
+    assert.ok(!paths.includes('newdir/'), 'the directory itself is not collapsed into one summary entry')
+    assert.ok(!paths.includes('newdir/b.txt'), 'a gitignored file inside the directory is still excluded')
+  } finally {
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
 test('malicious diff path is rejected without command execution',async()=>{const cwd=await fixture();try{const r=await gitDiff({path:'--output=/tmp/pwned'},cwd);assert.equal(r.error.code,'INVALID_GIT_ARGUMENT')}finally{await rm(cwd,{recursive:true,force:true})}})
 test('renamed and deleted files are classified',async()=>{const cwd=await fixture();try{await git(cwd,['mv','file.txt','renamed.txt']);let r=await gitStatus(cwd);assert.equal(r.files[0].status,'renamed');assert.equal(r.files[0].path,'renamed.txt');assert.equal(r.files[0].oldPath,'file.txt');await git(cwd,['rm','-f','renamed.txt']);r=await gitStatus(cwd);assert.equal(r.files[0].status,'deleted')}finally{await rm(cwd,{recursive:true,force:true})}})
 test('workspace sampling inlines bounded diffs for tracked and untracked files',async()=>{const cwd=await fixture();try{await writeFile(join(cwd,'file.txt'),'one\ntwo\n');await writeFile(join(cwd,'new.txt'),'brand new\ncontent\n');const ws=await gitWorkspace(cwd);const mod=ws.files.find(x=>x.path==='file.txt');assert.ok(mod.hunks,'modified file carries hunks');assert.deepEqual(mod.hunks[0].lines,[' one','+two']);const unt=ws.files.find(x=>x.path==='new.txt');assert.ok(unt.hunks,'untracked file gets a synthesized all-add hunk');assert.equal(unt.hunks[0].oldStart,0);assert.match(unt.hunks[0].lines[0],/^\+brand new$/);assert.equal(ws.files.find(x=>x.path==='nope.txt'),undefined)}finally{await rm(cwd,{recursive:true,force:true})}})

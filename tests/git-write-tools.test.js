@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, readFile, access, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, access, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -13,6 +13,7 @@ import { gitPush } from '../lib/git/push.js'
 import { gitCheckout } from '../lib/git/checkout.js'
 import { gitMerge } from '../lib/git/merge.js'
 import { gitReset } from '../lib/git/reset.js'
+import { gitDiscardPaths } from '../lib/git/discard_paths.js'
 import { gitStatus } from '../lib/git/status.js'
 
 const run = promisify(execFile)
@@ -246,6 +247,42 @@ test('git_reset modes move HEAD with soft, mixed, and confirmed-hard semantics',
     assert.equal(await readFile(join(cwd, 'file.txt'), 'utf8'), 'one\n')
     await access(join(cwd, 'b.txt'))
     assert.equal((await git(cwd, ['rev-parse', 'HEAD'])).stdout.trim(), secondSha)
+  } finally {
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+test('git_discard_paths reverts tracked changes and removes untracked files scoped to given paths only', async () => {
+  const cwd = await fixture()
+  try {
+    // Path-scoped, unlike git_reset mode:'hard': a second modified/untracked
+    // pair (kept.*) must survive untouched. `sub/new.txt` (inside a wholly
+    // untracked directory) exercises that gitStatus lists it by its own
+    // path — see --untracked-files=all in status.ts — rather than the
+    // directory collapsing to one "?? sub/" entry that wouldn't match this
+    // path.
+    await mkdir(join(cwd, 'sub'))
+    await writeFile(join(cwd, 'file.txt'), 'changed\n')
+    await writeFile(join(cwd, 'kept.txt'), 'kept\n')
+    await writeFile(join(cwd, 'sub', 'new.txt'), 'new\n')
+    await git(cwd, ['add', 'kept.txt'])
+
+    let r = await gitDiscardPaths({ paths: ['file.txt'] }, cwd)
+    assert.equal(r.error.code, 'DISCARD_REQUIRES_CONFIRM', 'discarding requires explicit confirmation')
+    assert.equal(await readFile(join(cwd, 'file.txt'), 'utf8'), 'changed\n', 'unconfirmed call must not touch the file')
+
+    r = await gitDiscardPaths({ paths: ['file.txt', 'sub/new.txt'], confirm: true }, cwd)
+    assert.equal(r.error, undefined)
+    assert.deepEqual(new Set(r.discarded), new Set(['file.txt', 'sub/new.txt']))
+    assert.equal(await readFile(join(cwd, 'file.txt'), 'utf8'), 'one\n', 'tracked change is reverted via restore')
+    await assert.rejects(access(join(cwd, 'sub', 'new.txt')), 'untracked file is removed via clean')
+    assert.equal(await readFile(join(cwd, 'kept.txt'), 'utf8'), 'kept\n', 'an unrelated staged file outside the given paths survives untouched')
+
+    r = await gitDiscardPaths({ paths: ['file.txt'], confirm: true }, cwd)
+    assert.equal(r.error.code, 'INVALID_GIT_ARGUMENT', 'nothing left to discard at that path is rejected, not silently a no-op')
+
+    r = await gitDiscardPaths({ paths: [], confirm: true }, cwd)
+    assert.equal(r.error.code, 'INVALID_GIT_ARGUMENT', 'an empty paths array is rejected')
   } finally {
     await rm(cwd, { recursive: true, force: true })
   }
