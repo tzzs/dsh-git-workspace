@@ -19,9 +19,11 @@ export interface CiResult {
 interface PrChecksRow {
   name: string
   state: string
-  conclusion?: string | null
+  bucket: string
   workflow?: string | null
-  url?: string | null
+  link?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
 }
 
 interface RunListRow {
@@ -31,16 +33,44 @@ interface RunListRow {
   workflowName?: string | null
   url?: string | null
   headSha?: string | null
+  startedAt?: string | null
+}
+
+// `gh pr checks --json` has no `conclusion`/`url` fields (only `pr view`/`run
+// list` do) - it exposes its own five-way `bucket` classification instead
+// (pass/fail/pending/skipping/cancel), which we translate back into the
+// status/conclusion shape the rest of this tool (and the client's
+// checkDotState) already expects.
+function bucketToStatus(bucket: string, state: string): { status: string; conclusion: string | null } {
+  switch (bucket) {
+    case 'pass':
+      return { status: 'completed', conclusion: 'success' }
+    case 'fail':
+      return { status: 'completed', conclusion: 'failure' }
+    case 'cancel':
+      return { status: 'completed', conclusion: 'cancelled' }
+    case 'skipping':
+      return { status: 'completed', conclusion: 'skipped' }
+    case 'pending':
+      return { status: 'in_progress', conclusion: null }
+    default:
+      return { status: (state || '').toLowerCase(), conclusion: null }
+  }
 }
 
 function mapState(rows: PrChecksRow[]): { status: string; checks: CheckRun[] } {
-  const checks: CheckRun[] = rows.map((x) => ({
-    name: x.name,
-    status: x.state,
-    conclusion: x.conclusion ?? null,
-    workflow: x.workflow ?? null,
-    url: x.url ?? null,
-  }))
+  const checks: CheckRun[] = rows.map((x) => {
+    const { status, conclusion } = bucketToStatus(x.bucket, x.state)
+    return {
+      name: x.name,
+      status,
+      conclusion,
+      workflow: x.workflow ?? null,
+      url: x.link ?? null,
+      startedAt: x.startedAt ?? null,
+      completedAt: x.completedAt ?? null,
+    }
+  })
   let status = 'success'
   for (const c of checks) {
     const s = (c.status ?? '').toLowerCase()
@@ -91,7 +121,7 @@ export async function githubCi(
           '--repo',
           repoArg(ctx),
           '--json',
-          'name,state,conclusion,workflow,url',
+          'name,state,bucket,workflow,link,startedAt,completedAt',
         ],
       )
       const rows = JSON.parse(out.stdout) as PrChecksRow[]
@@ -129,7 +159,7 @@ export async function githubCi(
       '--repo',
       repoArg(ctx),
       '--json',
-      'name,status,conclusion,workflowName,url,headSha',
+      'name,status,conclusion,workflowName,url,headSha,startedAt',
     ]
     if (branch) args.push('--branch', branch)
     const out = await gh(ctx, args)
@@ -140,6 +170,8 @@ export async function githubCi(
       conclusion: x.conclusion,
       workflow: x.workflowName ?? null,
       url: x.url ?? null,
+      startedAt: x.startedAt ?? null,
+      completedAt: null,
     }))
     let status = 'success'
     for (const c of checks) {

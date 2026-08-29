@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { githubPrMerge } from '../lib/github/pr_merge.js'
+import { githubPrClose } from '../lib/github/pr_close.js'
 import { githubPrComment } from '../lib/github/pr_comment.js'
 import { githubPrReview } from '../lib/github/pr_review.js'
 
@@ -82,6 +83,25 @@ fi
 exit 1
 `
 
+const CLOSE_DISPATCH = `${LOG_PREFIX}
+if [ "$1" = "pr" ] && [ "$2" = "close" ]; then
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  printf '%s' '{"url":"https://github.com/owner/repo/pull/7","state":"CLOSED"}'
+  exit 0
+fi
+exit 1
+`
+
+const CLOSE_FAILED_DISPATCH = `${LOG_PREFIX}
+if [ "$1" = "pr" ] && [ "$2" = "close" ]; then
+  echo "pull request is already merged" >&2
+  exit 1
+fi
+exit 1
+`
+
 const COMMENT_DISPATCH = `${LOG_PREFIX}
 if [ "$1" = "pr" ] && [ "$2" = "comment" ]; then
   echo "https://github.com/owner/repo/pull/7#issuecomment-1"
@@ -144,6 +164,47 @@ test('github_pr_merge maps a non-mergeable PR to GITHUB_PR_NOT_MERGEABLE', async
     const lines = await loggedLines(fx.log)
     assert.equal(lines.length, 1)
     assert.match(lines[0], /^pr merge /)
+  } finally {
+    await fx.cleanup()
+  }
+})
+
+test('github_pr_close closes a pull request without merging it', async () => {
+  const fx = await setupFixture(CLOSE_DISPATCH)
+  try {
+    const r = await githubPrClose({ number: 7 }, fx.cwd)
+    assert.equal(r.error, undefined)
+    assert.equal(r.number, 7)
+    assert.equal(r.state, 'CLOSED')
+    assert.equal(r.url, 'https://github.com/owner/repo/pull/7')
+    const lines = await loggedLines(fx.log)
+    assert.deepEqual(lines, [
+      'pr close --repo owner/repo 7',
+      'pr view --repo owner/repo 7 --json url,state',
+    ])
+  } finally {
+    await fx.cleanup()
+  }
+})
+
+test('github_pr_close reports a structured error instead of throwing', async () => {
+  const fx = await setupFixture(CLOSE_FAILED_DISPATCH)
+  try {
+    const r = await githubPrClose({ number: 7 }, fx.cwd)
+    assert.equal(r.error.code, 'GITHUB_PR_CLOSE_FAILED')
+    assert.ok(r.error.hint)
+  } finally {
+    await fx.cleanup()
+  }
+})
+
+test('github_pr_close rejects a non-positive PR number without calling gh', async () => {
+  const fx = await setupFixture(CLOSE_DISPATCH)
+  try {
+    const r = await githubPrClose({ number: 0 }, fx.cwd)
+    assert.equal(r.error.code, 'INVALID_GIT_ARGUMENT')
+    const lines = await loggedLines(fx.log)
+    assert.deepEqual(lines, [])
   } finally {
     await fx.cleanup()
   }

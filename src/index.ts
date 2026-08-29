@@ -35,10 +35,12 @@ import {
   githubPrComments,
   githubCi,
   githubCiLogs,
+  githubCiAnnotations,
   githubIssue,
   githubIssueComments,
   githubReleases,
   githubPrMerge,
+  githubPrClose,
   githubPrComment,
   githubPrReview,
 } from './tools/index.js'
@@ -1025,6 +1027,25 @@ export function apply(ctx: {
     },
   })
 
+  // ---- github_ci_annotations ----------------------------------------------
+  register(ctx, {
+    name: 'github_ci_annotations',
+    description: 'Read warning/error annotations attached to a CI check run.',
+    parameters: { checkId: int },
+    execute: (a) => githubCiAnnotations(a as never),
+    presenters: {
+      presentCall: () => genericCall('Read CI annotations'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'CI annotations failed') ?? 'CI annotations',
+            result.content,
+          )
+        return genericResult('CI annotations', result.content)
+      },
+    },
+  })
+
   // ---- github_issue ------------------------------------------------------
   register(ctx, {
     name: 'github_issue',
@@ -1137,6 +1158,35 @@ export function apply(ctx: {
             result.content,
           )
         return genericResult('Pull request merged', result.content)
+      },
+    },
+  })
+
+  // ---- github_pr_close ----------------------------------------------------
+  register(ctx, {
+    name: 'github_pr_close',
+    description:
+      'Write tool. Closes a GitHub pull request via the gh CLI without merging it - reversible by reopening the PR on GitHub.',
+    parameters: { number: int },
+    execute: (a) => githubPrClose(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; code?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`PR close failed: ${e.message ?? e.code ?? 'unknown error'}${hint}`)
+      }
+      const v = value as { number?: number; state?: string; url?: string | null }
+      return text(`Closed PR #${v.number} (${v.state ?? 'CLOSED'})${v.url ? `\n${v.url}` : ''}`)
+    },
+    presenters: {
+      presentCall: () => genericCall('Close pull request'),
+      presentResult: (_a, result) => {
+        if (result.isError)
+          return genericResult(
+            errorTitle(result, 'Close pull request') ?? 'Close pull request',
+            result.content,
+          )
+        return genericResult('Pull request closed', result.content)
       },
     },
   })

@@ -264,6 +264,17 @@ export function formatCiLogs(value: {
   ].join('\n')
 }
 
+export function formatCiAnnotations(value: {
+  checkId?: number
+  annotations?: Array<{path?: string; startLine?: number | null; level?: string; title?: string | null; message?: string}>
+}): string {
+  const anns = value.annotations || []
+  return [
+    `check ${value.checkId ?? '?'}: ${anns.length} annotation(s)`,
+    ...anns.map((a) => `  ${a.level ?? 'notice'} ${a.path ?? ''}${a.startLine ? `:${a.startLine}` : ''} - ${a.title ? `${a.title}: ` : ''}${a.message ?? ''}`),
+  ].join('\n')
+}
+
 export function formatIssue(value: {
   number?: number
   title?: string

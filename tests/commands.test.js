@@ -107,7 +107,7 @@ test('git-diff rejects a malformed JSON body without touching git', async () => 
 
 test('github read commands are registered (network calls not exercised here)', async () => {
   const registered = await registerAll()
-  for (const name of ['git-pr', 'git-pr-diff', 'git-pr-reviews', 'git-pr-comments', 'git-ci', 'git-ci-logs', 'git-issue', 'git-issue-comments', 'git-releases']) {
+  for (const name of ['git-pr', 'git-pr-diff', 'git-pr-reviews', 'git-pr-comments', 'git-ci', 'git-ci-logs', 'git-ci-annotations', 'git-issue', 'git-issue-comments', 'git-releases']) {
     assert.ok(registered.has(name), `${name} is registered`)
   }
 })

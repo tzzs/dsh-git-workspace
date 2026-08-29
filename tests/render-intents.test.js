@@ -26,6 +26,7 @@ const names = [
   'github_pr_comments',
   'github_ci',
   'github_ci_logs',
+  'github_ci_annotations',
   'github_issue',
   'github_issue_comments',
   'github_releases',
@@ -56,6 +57,8 @@ function argsFor(name) {
       return { number: 1 }
     case 'github_ci_logs':
       return { runId: 1 }
+    case 'github_ci_annotations':
+      return { checkId: 1 }
     default:
       return {}
   }

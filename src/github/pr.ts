@@ -20,7 +20,6 @@ interface PrRow {
   deletions?: number | null
   reviewDecision?: string | null
   mergeable?: string | null
-  merged?: boolean | null
 }
 
 export interface PrResult {
@@ -49,7 +48,11 @@ function mapPr(x: PrRow): PullRequest {
     },
     reviewDecision: x.reviewDecision ?? null,
     mergeable: x.mergeable ?? null,
-    merged: x.merged ?? false,
+    // `gh pr list --json` has no `merged` field (only `pr view`/`pr merge`
+    // do) — asking for it makes gh reject the whole call. `state` is the
+    // GraphQL PullRequestState enum (OPEN/CLOSED/MERGED), so it already
+    // carries this.
+    merged: x.state === 'MERGED',
   }
 }
 
@@ -93,7 +96,6 @@ export async function githubPr(
       'deletions',
       'reviewDecision',
       'mergeable',
-      'merged',
     ].join(','),
   ]
 

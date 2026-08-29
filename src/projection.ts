@@ -88,7 +88,13 @@ async function runSample(session: Session, force = false): Promise<void> {
             ci: result.ci
               ? {
                   status: result.ci.status,
-                  checks: result.ci.checks.map((c) => ({ ...c, workflow: null, url: null })),
+                  checks: result.ci.checks.map((c) => ({
+                    ...c,
+                    workflow: null,
+                    url: null,
+                    startedAt: null,
+                    completedAt: null,
+                  })),
                 }
               : null,
           })

@@ -12,6 +12,7 @@ import { githubPrReviews } from '../lib/github/pr_reviews.js'
 import { githubPrComments } from '../lib/github/pr_comments.js'
 import { githubCi } from '../lib/github/ci.js'
 import { githubCiLogs } from '../lib/github/ci_logs.js'
+import { githubCiAnnotations } from '../lib/github/ci_annotations.js'
 import { githubIssue } from '../lib/github/issue.js'
 import { githubIssueComments } from '../lib/github/issue_comments.js'
 import { githubReleases } from '../lib/github/releases.js'
@@ -83,7 +84,7 @@ index 000..abc
 '
       ;;
     checks)
-      printf '%s' '[{"name":"test","state":"completed","conclusion":"failure","workflow":"CI","url":"https://github.com/owner/repo/actions/runs/1"}]'
+      printf '%s' '[{"name":"test","state":"FAILURE","bucket":"fail","workflow":"CI","link":"https://github.com/owner/repo/actions/runs/1/job/999","startedAt":"2026-01-01T00:00:00Z","completedAt":"2026-01-01T00:05:00Z"}]'
       ;;
   esac
 elif [ "$1" = "run" ]; then
@@ -102,6 +103,12 @@ elif [ "$1" = "issue" ]; then
   fi
 elif [ "$1" = "release" ]; then
   printf '%s' '[{"name":"v1.0","tagName":"v1.0","url":"https://github.com/owner/repo/releases/tag/v1.0","publishedAt":"2026-01-01T00:00:00Z","author":{"login":"alice"},"body":"notes","targetCommitish":"abc"}]'
+elif [ "$1" = "api" ]; then
+  case "$2" in
+    */check-runs/*/annotations)
+      printf '%s' '[{"path":".github","start_line":2,"end_line":2,"annotation_level":"warning","title":"","message":"Node.js 20 is deprecated."}]'
+      ;;
+  esac
 fi
 `
 
@@ -184,6 +191,45 @@ test('github_ci returns failure status for PR checks', async () => {
     assert.equal(r.status, 'failure')
     assert.equal(r.checks[0].name, 'test')
     assert.equal(r.checks[0].conclusion, 'failure')
+    assert.equal(r.checks[0].status, 'completed')
+    assert.equal(r.checks[0].url, 'https://github.com/owner/repo/actions/runs/1/job/999')
+    assert.equal(r.checks[0].startedAt, '2026-01-01T00:00:00Z')
+    assert.equal(r.checks[0].completedAt, '2026-01-01T00:05:00Z')
+  } finally {
+    restore()
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+test('github_ci only requests json fields gh pr checks actually supports', async () => {
+  // `gh pr checks --json` has no conclusion/url fields (unlike `pr list`/`pr
+  // view`) - it exposes bucket/link instead. This mimics the real CLI's
+  // strict field validation so a future regression (like requesting
+  // `conclusion` again) fails loudly here instead of silently breaking CI
+  // status for every PR.
+  const ghBody = `#!/bin/sh
+if [ "$1" = "pr" ] && [ "$2" = "checks" ]; then
+  prev=""
+  for a in "$@"; do
+    if [ "$prev" = "--json" ]; then fields="$a"; fi
+    prev="$a"
+  done
+  for f in $(echo "$fields" | tr ',' ' '); do
+    case "$f" in
+      bucket|completedAt|description|event|link|name|startedAt|state|workflow) ;;
+      *) echo "Unknown JSON field: \\"$f\\"" 1>&2; exit 1 ;;
+    esac
+  done
+  printf '%s' '[{"name":"test","state":"SUCCESS","bucket":"pass","workflow":"CI","link":"https://github.com/owner/repo/actions/runs/1/job/2"}]'
+else
+  exit 1
+fi
+`
+  const { cwd, restore } = await setupFixture(ghBody)
+  try {
+    const r = await githubCi({ number: 1 }, cwd)
+    assert.equal(r.error, undefined, 'a field the real gh CLI rejects must not silently break CI status')
+    assert.equal(r.checks[0].conclusion, 'success')
   } finally {
     restore()
     await rm(cwd, { recursive: true, force: true })
@@ -211,6 +257,33 @@ test('github_ci_logs returns paged logs', async () => {
     assert.equal(r.totalLines, 3)
     assert.equal(r.logs.length, 3)
     assert.equal(r.logs[0], 'line1 of log')
+  } finally {
+    restore()
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+test('github_ci_annotations returns warning/error annotations for a check run', async () => {
+  const { cwd, restore } = await setupFixture(DISPATCH)
+  try {
+    const r = await githubCiAnnotations({ checkId: 98938175279 }, cwd)
+    assert.equal(r.error, undefined)
+    assert.equal(r.annotations.length, 1)
+    assert.equal(r.annotations[0].path, '.github')
+    assert.equal(r.annotations[0].startLine, 2)
+    assert.equal(r.annotations[0].level, 'warning')
+    assert.match(r.annotations[0].message, /Node\.js 20/)
+  } finally {
+    restore()
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+test('github_ci_annotations rejects a non-positive checkId without calling gh', async () => {
+  const { cwd, restore } = await setupFixture(DISPATCH)
+  try {
+    const r = await githubCiAnnotations({ checkId: 0 }, cwd)
+    assert.equal(r.error.code, 'INVALID_GIT_ARGUMENT')
   } finally {
     restore()
     await rm(cwd, { recursive: true, force: true })

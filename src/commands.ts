@@ -11,6 +11,7 @@ import type {MergeOptions} from './git/merge.js'
 import type {ResetOptions} from './git/reset.js'
 import type {PrCreateOptions} from './github/pr_create.js'
 import type {PrMergeOptions} from './github/pr_merge.js'
+import type {PrCloseOptions} from './github/pr_close.js'
 import type {PrCommentOptions} from './github/pr_comment.js'
 import type {PrReviewOptions} from './github/pr_review.js'
 import type {Scope as FilesScope} from './git/files.js'
@@ -22,6 +23,7 @@ import type {BlameOptions} from './git/blame.js'
 import type {PrDiffOptions} from './github/pr_diff.js'
 import type {CiOptions} from './github/ci.js'
 import type {CiLogsOptions} from './github/ci_logs.js'
+import type {CiAnnotationsOptions} from './github/ci_annotations.js'
 import {
   gitStatus,
   gitFiles,
@@ -50,10 +52,12 @@ import {
   githubPrComments,
   githubCi,
   githubCiLogs,
+  githubCiAnnotations,
   githubIssue,
   githubIssueComments,
   githubReleases,
   githubPrMerge,
+  githubPrClose,
   githubPrComment,
   githubPrReview,
   gitWorkspace,
@@ -86,6 +90,7 @@ import {
   formatPrComments,
   formatCi,
   formatCiLogs,
+  formatCiAnnotations,
   formatIssue,
   formatIssueComments,
   formatReleases,
@@ -228,6 +233,7 @@ export async function installGitCommands(ctx: Pick<Context, 'inject'>): Promise<
     toolCommand<{number?: number}>(githubPrComments, 'git-pr-comments', 'Read-only GitHub command. List conversation and inline comments for a pull request.', formatPrComments)
     toolCommand<CiOptions>(githubCi, 'git-ci', 'Read-only GitHub command. Show CI check status for a pull request or branch.', formatCi)
     toolCommand<CiLogsOptions>(githubCiLogs, 'git-ci-logs', 'Read-only GitHub command. Fetch log lines for a CI run or job.', formatCiLogs)
+    toolCommand<CiAnnotationsOptions>(githubCiAnnotations, 'git-ci-annotations', 'Read-only GitHub command. Fetch warning/error annotations for a CI check run.', formatCiAnnotations)
     toolCommand<{number?: number}>(githubIssue, 'git-issue', 'Read-only GitHub command. Show issue metadata.', formatIssue)
     toolCommand<{number?: number}>(githubIssueComments, 'git-issue-comments', 'Read-only GitHub command. List comments for an issue.', formatIssueComments)
     toolCommand<{limit?: number}>(githubReleases, 'git-releases', 'Read-only GitHub command. List recent releases.', formatReleases)
@@ -268,6 +274,7 @@ export async function installGitCommands(ctx: Pick<Context, 'inject'>): Promise<
     toolCommand<Record<string, never>>((_, dir) => gitRebase(dir), 'git-rebase', 'Write command. Rebase the current branch onto its upstream; may stop with conflict state.')
     toolCommand<PrCreateOptions>(githubPrCreate, 'git-pr-create', 'Write GitHub command. Open a pull request for the current/explicit head branch.')
     toolCommand<PrMergeOptions>(githubPrMerge, 'git-pr-merge', 'Write GitHub command. Merge a pull request and optionally delete its source branch.')
+    toolCommand<PrCloseOptions>(githubPrClose, 'git-pr-close', 'Write GitHub command. Close a pull request without merging it.')
     toolCommand<PrCommentOptions>(githubPrComment, 'git-pr-comment', 'Write GitHub command. Add a comment to a pull request.')
     toolCommand<PrReviewOptions>(githubPrReview, 'git-pr-review', 'Write GitHub command. Submit an approval, request-changes review, or comment review.')
   }))

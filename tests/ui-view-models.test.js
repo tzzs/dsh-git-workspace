@@ -192,6 +192,44 @@ test('toWorkspaceMeta carries files, commits, branches, stash and comparison', (
   assert.ok(typeof m.sampledAt === 'string' && !Number.isNaN(Date.parse(m.sampledAt)), 'stamps an ISO sampledAt')
 })
 
+test('toWorkspaceMeta passes the pull request base branch through', () => {
+  const m = toWorkspaceMeta({
+    repository: { name: 'repo', root: '/r', remote: null },
+    branch: { name: 'feature-x', upstream: 'origin/feature-x', ahead: 1, behind: 0 },
+    workspace: { clean: true, modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+    comparison: { base: 'develop', ahead: 3, behind: 0 },
+    pullRequest: { number: 9, title: 'PR', base: 'develop', state: 'OPEN', draft: false, url: 'u' },
+    ci: null,
+  })
+  assert.equal(m.pullRequest.base, 'develop')
+  assert.equal(m.comparison.base, 'develop')
+})
+
+test('toWorkspaceMeta carries CI check timing fields through', () => {
+  const m = toWorkspaceMeta({
+    repository: { name: 'repo', root: '/r', remote: null },
+    branch: { name: 'b', upstream: null, ahead: 0, behind: 0 },
+    workspace: { clean: true, modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+    pullRequest: null,
+    ci: {
+      status: 'success',
+      checks: [
+        {
+          name: 'test (24)',
+          status: 'completed',
+          conclusion: 'success',
+          workflow: 'CI',
+          url: 'https://github.com/o/r/actions/runs/1/job/2',
+          startedAt: '2026-08-28T18:02:33Z',
+          completedAt: '2026-08-28T18:02:47Z',
+        },
+      ],
+    },
+  })
+  assert.equal(m.ci.checks[0].startedAt, '2026-08-28T18:02:33Z')
+  assert.equal(m.ci.checks[0].completedAt, '2026-08-28T18:02:47Z')
+})
+
 test('toWorkspaceMeta omits optional sections when absent', () => {
   const m = toWorkspaceMeta({
     repository: { name: 'r', root: '/r', remote: null },

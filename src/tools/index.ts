@@ -25,10 +25,12 @@ import { githubPrReviews } from '../github/pr_reviews.js'
 import { githubPrComments } from '../github/pr_comments.js'
 import { githubCi } from '../github/ci.js'
 import { githubCiLogs } from '../github/ci_logs.js'
+import { githubCiAnnotations } from '../github/ci_annotations.js'
 import { githubIssue } from '../github/issue.js'
 import { githubIssueComments } from '../github/issue_comments.js'
 import { githubReleases } from '../github/releases.js'
 import { githubPrMerge } from '../github/pr_merge.js'
+import { githubPrClose } from '../github/pr_close.js'
 import { githubPrComment } from '../github/pr_comment.js'
 import { githubPrReview } from '../github/pr_review.js'
 import { repository, listRemotes } from '../git/repository.js'
@@ -63,10 +65,12 @@ export {
   githubPrComments,
   githubCi,
   githubCiLogs,
+  githubCiAnnotations,
   githubIssue,
   githubIssueComments,
   githubReleases,
   githubPrMerge,
+  githubPrClose,
   githubPrComment,
   githubPrReview,
   repository,

@@ -104,9 +104,12 @@ export function isGhNotInstalled(e: unknown): boolean {
 export function isGhNotAuthenticated(e: unknown): boolean {
   const { msg } = parseErrorCode(e)
   const stderr = String((e as { stderr?: unknown }).stderr ?? '')
+  // Bare `auth` also matches unrelated gh output, e.g. "author" in the
+  // field list of an "Unknown JSON field" error — which then hides the
+  // real cause behind a bogus "not authenticated" report.
   return (
-    /auth|login|not logged|logged into/i.test(msg) ||
-    /auth|login|not logged|logged into/i.test(stderr)
+    /authenticat|login|not logged|logged into/i.test(msg) ||
+    /authenticat|login|not logged|logged into/i.test(stderr)
   )
 }
 

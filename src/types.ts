@@ -163,6 +163,8 @@ export interface CheckRun {
   conclusion: string | null
   workflow: string | null
   url: string | null
+  startedAt: string | null
+  completedAt: string | null
 }
 
 export interface Issue {

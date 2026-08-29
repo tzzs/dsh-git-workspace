@@ -37,6 +37,7 @@ export interface WorkspaceMeta {
   pullRequest: {
     number: number
     title: string
+    base: string
     state: string
     draft: boolean
     merged?: boolean
@@ -114,6 +115,8 @@ export interface CheckMeta {
   conclusion: string | null
   workflow: string | null
   url: string | null
+  startedAt: string | null
+  completedAt: string | null
 }
 
 export interface PrMeta {
@@ -241,6 +244,8 @@ function checkMeta(c: CheckRun): CheckMeta {
     conclusion: c.conclusion,
     workflow: c.workflow,
     url: c.url,
+    startedAt: c.startedAt,
+    completedAt: c.completedAt,
   }
 }
 
@@ -260,6 +265,7 @@ export function toWorkspaceMeta(w: {
   pullRequest: {
     number: number
     title: string
+    base: string
     state: string
     draft: boolean
     merged?: boolean

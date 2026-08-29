@@ -240,6 +240,7 @@ export interface WorkspaceResult {
   pullRequest: {
     number: number
     title: string
+    base: string
     state: string
     draft: boolean
     merged: boolean
@@ -249,7 +250,15 @@ export interface WorkspaceResult {
   } | null
   ci?: {
     status: string
-    checks: Array<{ name: string; status: string; conclusion: string | null }>
+    checks: Array<{
+      name: string
+      status: string
+      conclusion: string | null
+      workflow: string | null
+      url: string | null
+      startedAt: string | null
+      completedAt: string | null
+    }>
   } | null
 }
 
@@ -282,6 +291,30 @@ async function fileNumstats(root: string) {
   }
 }
 
+// Prefer the ref `origin/HEAD` actually points at (set by a normal clone,
+// always correct even if the remote's default branch isn't named main or
+// master). Fall back to probing main/master by name — as a local branch,
+// then as a remote-tracking ref — for repos where `origin/HEAD` was never
+// set (e.g. `git init` + a manually added remote, common in test fixtures).
+async function detectDefaultBranch(root: string): Promise<string | null> {
+  try {
+    const out = await command('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], root)
+    const ref = out.stdout.trim().replace(/^origin\//, '')
+    if (ref) return ref
+  } catch {}
+  for (const name of ['main', 'master']) {
+    try {
+      await command('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], root)
+      return name
+    } catch {}
+    try {
+      await command('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${name}`], root)
+      return name
+    } catch {}
+  }
+  return null
+}
+
 export async function gitWorkspace(
   cwd = process.cwd(),
 ): Promise<Result<WorkspaceResult>> {
@@ -306,15 +339,39 @@ export async function gitWorkspace(
     behind: s.branch.behind,
   }
 
-  // Prefer the branch's own remote-tracking ref (already fetched, always
-  // current) as the diff base; fall back to main/master only when the
-  // branch has never been pushed.
-  const compareBase =
-    s.branch.upstream ??
-    (currentBranch && currentBranch !== 'main' && currentBranch !== 'master' ? 'main' : null)
+  // "Committed on branch" means "everything since this branch forked off its
+  // base" — the branch's own remote-tracking ref answers a different
+  // question (what's unpushed to my own copy) and is usually 0 once pushed,
+  // even though the branch is dozens of commits into a feature. So: an open
+  // PR names the real merge target, prefer it; otherwise prefer the
+  // repository's actual default branch; only fall back to the upstream (or
+  // nothing) when neither is available.
+  const prBase = !('error' in pr) && pr.pullRequests.length > 0 ? pr.pullRequests[0].base : null
+
+  // The parallel `ci` fetch above only covers the branch's own run history
+  // (coarse: one row per historical workflow run, no per-job breakdown, no
+  // timing/url). An open PR's checks are job-level (test (20), test (24),
+  // package, ...) and carry the detail the Pull Request tab's Checks section
+  // needs - worth one extra sequential call since it only fires when a PR
+  // actually exists. Falls back to the branch-level result on error so a
+  // flaky PR-checks call never regresses to no CI data at all.
+  const prNumber = !('error' in pr) && pr.pullRequests.length > 0 ? pr.pullRequests[0].number : null
+  const prCi = prNumber !== null ? await githubCi({ number: prNumber }, r.root) : null
+  const effectiveCi = prCi && !('error' in prCi) ? prCi : ci
+  const defaultBase = prBase ? null : await detectDefaultBranch(r.root)
+  const bareBase = prBase ?? (defaultBase && defaultBase !== currentBranch ? defaultBase : null)
+  const compareBase = bareBase ?? s.branch.upstream ?? null
 
   if (compareBase && currentBranch && compareBase !== currentBranch) {
-    const cmp = await gitCompare({ base: compareBase, head: currentBranch }, r.root)
+    let cmp = await gitCompare({ base: compareBase, head: currentBranch }, r.root)
+    // A PR base or detected default branch is often only present locally as
+    // a remote-tracking ref (never checked out by name), so retry against
+    // `origin/<base>` before giving up. `comparison.base` below stays the
+    // bare name either way — that's what GitHub/most tools call it, and
+    // what the client matches on.
+    if ('error' in cmp && compareBase === bareBase) {
+      cmp = await gitCompare({ base: `origin/${compareBase}`, head: currentBranch }, r.root)
+    }
     if (!('error' in cmp)) {
       comparison = {
         base: compareBase,
@@ -341,6 +398,7 @@ export async function gitWorkspace(
       ? {
           number: pr.pullRequests[0].number,
           title: pr.pullRequests[0].title,
+          base: pr.pullRequests[0].base,
           state: pr.pullRequests[0].state,
           draft: pr.pullRequests[0].draft,
           merged: pr.pullRequests[0].merged,
@@ -433,14 +491,18 @@ export async function gitWorkspace(
     additionsTotal,
     deletionsTotal,
     pullRequest: pullRequestFull,
-    ...(!('error' in ci)
+    ...(!('error' in effectiveCi)
       ? {
           ci: {
-            status: ci.status,
-            checks: ci.checks.map((c) => ({
+            status: effectiveCi.status,
+            checks: effectiveCi.checks.map((c) => ({
               name: c.name,
               status: c.status,
               conclusion: c.conclusion,
+              workflow: c.workflow,
+              url: c.url,
+              startedAt: c.startedAt,
+              completedAt: c.completedAt,
             })),
           },
         }
