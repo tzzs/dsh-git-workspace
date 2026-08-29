@@ -14,14 +14,15 @@ import {
 import {
   Row,
   Code,
-  Pill,
   TintPill,
   CircleIcon,
   Stat,
   Muted,
   Dot,
   CopyBtn,
+  IconBtn,
   Section,
+  Modal,
   checkDotState,
 } from '../components.js'
 import { DiffViewer } from './diff-viewer.js'
@@ -48,7 +49,7 @@ function StatusChip({ status }) {
       style: {
         fontFamily: 'var(--dsw-font-family-code)',
         fontSize: '11px',
-        fontWeight: 600,
+        fontWeight: 500,
         color: c.color,
         width: '12px',
         flex: 'none',
@@ -166,7 +167,14 @@ function FileStats({ additions, deletions }) {
 function buildTree(files) {
   const root = { dirs: new Map(), files: [] }
   for (const f of files) {
-    const segs = f.path.split('/')
+    // `git status` reports a directory that's untracked *in full* as one
+    // entry ending in "/" (e.g. ".claude/") rather than listing its
+    // contents — splitting that as-is leaves a trailing empty segment,
+    // which rendered as a file row with no name. Strip it so the path is
+    // treated as one opaque leaf (staging it stages the whole directory,
+    // same as `git add .claude/` would).
+    const path = f.path.endsWith('/') ? f.path.slice(0, -1) : f.path
+    const segs = path.split('/')
     let node = root
     for (let i = 0; i < segs.length - 1; i++) {
       const seg = segs[i]
@@ -184,6 +192,13 @@ function treeSize(node) {
   return n
 }
 
+function collectDirFiles(dir, out) {
+  out = out || []
+  for (const f of dir.files) out.push(f)
+  for (const d of dir.dirs.values()) collectDirFiles(d, out)
+  return out
+}
+
 // Merge a chain of directories that each hold nothing but a single
 // child directory into one row (e.g. "client" + "panel" -> "client/panel"),
 // mirroring VS Code/GitLens folder compaction.
@@ -197,19 +212,30 @@ function compactDir(dir) {
   for (const child of dir.dirs.values()) compactDir(child)
 }
 
-function DirNode({ dir, depth, onDispatch }) {
+function DirNode({ dir, depth, onDispatch, onOpenDiff, activePath }) {
   const [open, setOpen] = React.useState(true)
   return React.createElement(
     React.Fragment,
     null,
     React.createElement(
-      'button',
+      // A real `<button>` can't nest another real `<button>` (the hover
+      // stage/unstage control below) without breaking click handling and
+      // a11y semantics, so this row — like FileTreeRow's clickable variant —
+      // is a `role="button"` div instead.
+      'div',
       {
-        type: 'button',
+        role: 'button',
+        tabIndex: 0,
         className: 'dgw-row dgw-dirbtn',
         onClick: () => setOpen((v) => !v),
+        onKeyDown: (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setOpen((v) => !v)
+          }
+        },
         'aria-expanded': open,
-        style: { padding: `2px 6px 2px ${depth * 12 + 2}px` },
+        style: { padding: `1px 6px 1px ${depth * 12 + 2}px`, lineHeight: '15px' },
       },
       React.createElement(
         'span',
@@ -223,12 +249,20 @@ function DirNode({ dir, depth, onDispatch }) {
       ),
       React.createElement(
         'span',
-        { style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' } },
+        // `flex: '0 1 auto'`, not `1 1 auto` — the name hugs its own text
+        // (shrinking with an ellipsis only if the row is genuinely too
+        // narrow) instead of stretching to fill the row, which pushed the
+        // count all the way to the far right edge instead of sitting next
+        // to the name like the reference design.
+        { style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' } },
         dir.name,
       ),
       React.createElement(Muted, null, String(treeSize(dir))),
+      React.createElement('span', { style: { flex: '1 1 auto' } }),
+      dirDiscardControl(dir, onDispatch),
+      dirStageControl(dir, onDispatch),
     ),
-    open ? React.createElement(TreeNodeRows, { node: dir, depth: depth + 1, onDispatch }) : null,
+    open ? React.createElement(TreeNodeRows, { node: dir, depth: depth + 1, onDispatch, onOpenDiff, activePath }) : null,
   )
 }
 
@@ -240,7 +274,9 @@ function filterFiles(files, search) {
 
 // Shared by the "Changes" tree and the read-only "Committed on branch"
 // tree — pass `onDispatch: null` for the latter to hide stage controls.
-function FileTree({ files, onDispatch, viewMode = 'tree' }) {
+// `onOpenDiff(file, onDispatch)` opens the shared diff modal (see ScTab);
+// `activePath` is the path currently shown there, used to highlight the row.
+function FileTree({ files, onDispatch, viewMode = 'tree', onOpenDiff, activePath }) {
   if (files.length === 0) return null
   if (viewMode === 'list') {
     const sorted = [...files].sort((a, b) => a.path.localeCompare(b.path))
@@ -253,13 +289,15 @@ function FileTree({ files, onDispatch, viewMode = 'tree' }) {
           file: { ...f, name: f.path },
           depth: 0,
           onDispatch,
+          onOpenDiff,
+          activePath,
         }),
       ),
     )
   }
   const tree = buildTree(files)
   for (const child of tree.dirs.values()) compactDir(child)
-  return React.createElement(TreeNodeRows, { node: tree, depth: 0, onDispatch })
+  return React.createElement(TreeNodeRows, { node: tree, depth: 0, onDispatch, onOpenDiff, activePath })
 }
 
 function ViewModeToggle({ mode, onChange }) {
@@ -301,15 +339,80 @@ function ViewModeToggle({ mode, onChange }) {
   return React.createElement('span', { style: { display: 'inline-flex', gap: '2px', flex: 'none' } }, btn('tree', 'Tree'), btn('list', 'List'))
 }
 
-function TreeNodeRows({ node, depth, onDispatch }) {
+// A "…" overflow menu for the Graph section: lets a commit's expanded file
+// list render grouped by directory (Tree) or flat (List). Menu items use
+// A generic `.dgw-actionmenu` row: an optional trailing checkmark for the
+// active choice in a picker (e.g. GraphViewMenu), or a plain/`color`-tinted
+// action (e.g. the merge split-button's method choices and its destructive
+// Close PR entry). `<span role="button">`, not `<button>` — some callers
+// (GraphViewMenu) mount this inside Section's own header `<button>`, and a
+// nested real `<button>` gets reparented out by the HTML parser (see
+// IconActionBtn above); every caller uses the same element for consistency.
+function MenuItem({ label, active, color, onClick }) {
+  return React.createElement(
+    'span',
+    {
+      role: 'button',
+      tabIndex: 0,
+      className: 'dgw-action',
+      style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', cursor: 'pointer', ...(color ? { color } : {}) },
+      onClick: (e) => {
+        if (e) e.stopPropagation()
+        onClick()
+      },
+      onKeyDown: (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          e.stopPropagation()
+          onClick()
+        }
+      },
+    },
+    React.createElement('span', null, label),
+    active ? React.createElement(IconCheckOutline14, { size: 12 }) : null,
+  )
+}
+
+function GraphViewMenu({ mode, onChange }) {
+  const [open, setOpen] = React.useState(false)
+  const pick = (id) => {
+    onChange(id)
+    setOpen(false)
+  }
+  return React.createElement(
+    'span',
+    { style: { position: 'relative', display: 'inline-flex' } },
+    React.createElement(
+      IconActionBtn,
+      { title: 'Commit file view options', onClick: () => setOpen((v) => !v) },
+      React.createElement(IconChevronRightOutline14, { size: 13, style: { transform: 'rotate(90deg)' } }),
+    ),
+    open
+      ? React.createElement(
+          'div',
+          // `.dgw-actionmenu`'s own width (240px, sized for the longer Git
+          // action labels) is both too wide and, combined with its
+          // overflow-y:auto implicitly making overflow-x:auto too (a CSS
+          // rule when only one axis is non-visible), any *narrower* fixed
+          // guess risks clipping this menu's own text with a scrollbar.
+          // Size to content instead, with a sane min/max.
+          { className: 'dgw-actionmenu', style: { width: 'max-content', minWidth: '150px', maxWidth: '220px', whiteSpace: 'nowrap', boxSizing: 'border-box' } },
+          React.createElement(MenuItem, { label: 'View as Tree', active: mode === 'tree', onClick: () => pick('tree') }),
+          React.createElement(MenuItem, { label: 'View as List', active: mode === 'list', onClick: () => pick('list') }),
+        )
+      : null,
+  )
+}
+
+function TreeNodeRows({ node, depth, onDispatch, onOpenDiff, activePath }) {
   const rows = []
   const dirs = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
   for (const dir of dirs) {
-    rows.push(React.createElement(DirNode, { key: 'd/' + dir.name, dir, depth, onDispatch }))
+    rows.push(React.createElement(DirNode, { key: 'd/' + dir.name, dir, depth, onDispatch, onOpenDiff, activePath }))
   }
   for (const f of files) {
-    rows.push(React.createElement(FileTreeRow, { key: f.path + f.staged, file: f, depth, onDispatch }))
+    rows.push(React.createElement(FileTreeRow, { key: f.path + f.staged, file: f, depth, onDispatch, onOpenDiff, activePath }))
   }
   return rows
 }
@@ -355,84 +458,118 @@ function fileStageControl(file, onDispatch) {
   )
 }
 
+// A folder-level counterpart to `fileStageControl`, revealed on hover (same
+// `.dgw-copy` opacity trick as the per-row copy-path button) — stages or
+// unstages every file under this directory in one dispatch instead of
+// clicking each one individually.
+function dirStageControl(dir, onDispatch) {
+  if (!onDispatch) return null
+  const files = collectDirFiles(dir)
+  if (files.length === 0) return null
+  const allStaged = files.every((f) => f.staged === true)
+  const action = allStaged
+    ? { name: 'git-unstage', args: { paths: files.map((f) => f.path) } }
+    : { name: 'git-stage', args: { paths: files.map((f) => f.path) } }
+  return React.createElement(
+    'span',
+    { className: 'dgw-copy', onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
+    React.createElement(
+      IconBtn,
+      { label: allStaged ? 'Unstage all files in this folder' : 'Stage all files in this folder', onClick: () => onDispatch(action) },
+      React.createElement(allStaged ? IconCheckOutline14 : IconPlusOutline16, { size: 13 }),
+    ),
+  )
+}
+
+// Shared by `fileDiscardControl` and `dirDiscardControl` — permanently
+// reverts (tracked) or removes (untracked) every given path via
+// `git-discard-paths`. No client-side confirm dialog, matching the existing
+// "Discard Changes" menu item (`git-discard`), which also dispatches
+// immediately: the deliberate hover + click on a destructive-looking icon
+// *is* the confirmation step here.
+function discardControl(paths, onDispatch, label) {
+  if (!onDispatch || paths.length === 0) return null
+  return React.createElement(
+    'span',
+    { className: 'dgw-copy', onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
+    React.createElement(
+      IconBtn,
+      { label, onClick: () => onDispatch({ name: 'git-discard-paths', args: { paths } }) },
+      React.createElement(IconRefreshOutline14, { size: 13 }),
+    ),
+  )
+}
+
+function fileDiscardControl(file, onDispatch) {
+  return discardControl([file.path], onDispatch, 'Discard changes to this file')
+}
+
+function dirDiscardControl(dir, onDispatch) {
+  if (!onDispatch) return null
+  const files = collectDirFiles(dir)
+  return discardControl(files.map((f) => f.path), onDispatch, 'Discard changes in this folder')
+}
+
 function fileIconColor(status) {
   return (STATUS_LETTER[status] && STATUS_LETTER[status].color) || 'var(--dsw-alias-label-caption)'
 }
 
-function FileTreeRow({ file, depth, onDispatch }) {
-  const [open, setOpen] = React.useState(false)
-  const rowStyle = { padding: `2px 6px 2px ${depth * 12 + 22}px`, gap: '5px' }
-  if (!hasPatch(file)) {
+// File rows have no chevron (unlike DirNode) — they don't expand in place, a
+// standalone diff popup opens instead — but they do get the same generic
+// file icon a folder gets, so DIR_ICON_INSET is just DirNode's own
+// chevron(12) + gap(5): enough padding for a file's icon to land under a
+// sibling folder's icon at the same tree depth, instead of under its
+// chevron.
+const DIR_ICON_INSET = 17
+function FileTreeRow({ file, depth, onDispatch, onOpenDiff, activePath }) {
+  const clickable = hasPatch(file) && typeof onOpenDiff === 'function'
+  const isActive = clickable && activePath === file.path
+  const rowStyle = { padding: `1px 6px 1px ${depth * 12 + 2 + DIR_ICON_INSET}px`, gap: '5px', lineHeight: '15px' }
+  const rowChildren = [
+    React.createElement(
+      'span',
+      { key: 'icon', style: { display: 'inline-flex', color: fileIconColor(file.status), flex: 'none' } },
+      React.createElement(IconCodeOutline16, { size: 13 }),
+    ),
+    React.createElement(Code, { key: 'name', style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
+    React.createElement(FileStats, { key: 'stats', additions: file.additions, deletions: file.deletions }),
+    React.createElement(StatusChip, { key: 'status', status: file.status }),
+    fileStageControl(file, onDispatch),
+    fileDiscardControl(file, onDispatch),
+  ]
+  if (!clickable) {
     return React.createElement(
       Row,
       { className: 'dgw-row', style: rowStyle },
-      React.createElement(
-        'span',
-        { style: { display: 'inline-flex', color: fileIconColor(file.status), flex: 'none' } },
-        React.createElement(IconCodeOutline16, { size: 13 }),
-      ),
-      React.createElement(Code, { style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
-      React.createElement(FileStats, { additions: file.additions, deletions: file.deletions }),
-      React.createElement(StatusChip, { status: file.status }),
-      fileStageControl(file, onDispatch),
-      React.createElement(CopyBtn, { text: file.path, label: 'Copy path' }),
+      ...rowChildren,
+      React.createElement(CopyBtn, { key: 'copy', text: file.path, label: 'Copy path' }),
     )
   }
-  const toggle = () => setOpen((v) => !v)
+  const open = () => onOpenDiff(file, onDispatch)
   return React.createElement(
-    React.Fragment,
-    null,
-    React.createElement(
-      'div',
-      {
-        className: 'dgw-row dgw-filebtn',
-        role: 'button',
-        tabIndex: 0,
-        title: 'Toggle diff',
-        onClick: toggle,
-        onKeyDown: (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            toggle()
-          }
-        },
-        'aria-expanded': open,
-        style: rowStyle,
+    'div',
+    {
+      className: 'dgw-row dgw-filebtn',
+      role: 'button',
+      tabIndex: 0,
+      title: 'View diff',
+      onClick: open,
+      onKeyDown: (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          open()
+        }
       },
-      React.createElement(
-        'span',
-        { className: 'dgw-chevron', 'data-open': String(open) },
-        React.createElement(IconChevronRightOutline14, { size: 12 }),
-      ),
-      React.createElement(
-        'span',
-        { style: { display: 'inline-flex', color: fileIconColor(file.status), flex: 'none' } },
-        React.createElement(IconCodeOutline16, { size: 13 }),
-      ),
-      React.createElement(Code, { style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
-      React.createElement(FileStats, { additions: file.additions, deletions: file.deletions }),
-      React.createElement(StatusChip, { status: file.status }),
-      fileStageControl(file, onDispatch),
-      React.createElement(
-        'span',
-        { className: 'dgw-copy', onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
-        React.createElement(CopyBtn, { text: file.path, label: 'Copy path' }),
-      ),
+      'aria-pressed': isActive,
+      'data-active': String(isActive),
+      style: rowStyle,
+    },
+    ...rowChildren,
+    React.createElement(
+      'span',
+      { key: 'copy', className: 'dgw-copy', onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
+      React.createElement(CopyBtn, { text: file.path, label: 'Copy path' }),
     ),
-    open
-      ? React.createElement(
-          'div',
-          { style: { margin: `0 -6px 0 ${depth * 12 + 28}px` } },
-          React.createElement(
-            DiffViewer,
-            {
-              file,
-              onClose: () => setOpen(false),
-              onAskFull: onDispatch ? () => onDispatch({name: 'git-diff', args: {path: file.path}}) : null,
-            },
-          ),
-        )
-      : null,
   )
 }
 
@@ -713,7 +850,7 @@ function CleanState({ text }) {
   )
 }
 
-function ChangesBody({ data, onDispatch, search, viewMode }) {
+function ChangesBody({ data, onDispatch, search, viewMode, onOpenDiff, activePath }) {
   const all = Array.isArray(data.files) ? data.files : []
   const filtered = filterFiles(all, search)
   const bulk = onDispatch && !data.clean
@@ -730,7 +867,7 @@ function ChangesBody({ data, onDispatch, search, viewMode }) {
       { style: { display: 'flex', flexDirection: 'column' } },
       bulk,
       filtered.length > 0
-        ? React.createElement(FileTree, { files: filtered, onDispatch, viewMode })
+        ? React.createElement(FileTree, { files: filtered, onDispatch, viewMode, onOpenDiff, activePath })
         : React.createElement(Muted, null, `No files match “${search}”.`),
       data.filesTruncated
         ? React.createElement(
@@ -761,36 +898,45 @@ function ChangesBody({ data, onDispatch, search, viewMode }) {
 
 const GRAPH_LINE = 'var(--dsw-alias-border-l2)'
 
-function CommitGraphRow({ c, i, total, branchName, ahead, upstream, onDispatch }) {
+function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch, filesViewMode, onDispatch, onOpenDiff, activePath }) {
   const isHead = i === 0
   const [open, setOpen] = React.useState(isHead)
   const isLocal = i < ahead
   const isBoundary = Boolean(upstream) && i === ahead
+  const isTargetBoundary = Boolean(targetBranch) && i === targetBranch.ahead
   const isMerge = /^Merge\b/.test(c.message || '')
   const color = isLocal
     ? 'var(--dsw-alias-brand-primary)'
     : upstream
       ? 'var(--dsw-alias-state-warn-primary)'
       : 'var(--dsw-alias-label-caption)'
+  // HEAD and merge commits render as hollow rings ("graph nodes"); selecting
+  // (expanding) a row fills it solid so the selected commit stands out.
+  const isRing = isHead || isMerge
+  const solid = !isRing || open
+  const size = isHead ? 11 : 9
   const dot = {
     position: 'absolute',
-    left: '4px',
+    left: isHead ? '3px' : '4px',
     top: '50%',
-    marginTop: '-4.5px',
-    width: '9px',
-    height: '9px',
+    marginTop: `${-size / 2}px`,
+    width: `${size}px`,
+    height: `${size}px`,
     borderRadius: '50%',
     boxSizing: 'border-box',
   }
-  if (isMerge && !isHead) {
-    dot.background = 'transparent'
-    dot.border = `2px solid ${color}`
-  } else {
+  if (solid) {
     dot.background = color
+  } else {
+    dot.background = 'transparent'
+    dot.border = `${isHead ? 2.5 : 2}px solid ${color}`
   }
-  if (isHead) dot.boxShadow = `0 0 0 2px var(--dsw-alias-bg-layer-2), 0 0 0 3.5px ${color}`
   const toggle = () => setOpen((v) => !v)
   const meta = [c.author, c.date ? fmtDate(c.date) : null, c.shortSha].filter(Boolean).join(' · ')
+  const pills = []
+  if (isHead && branchName) pills.push(React.createElement(TintPill, { key: 'head', text: branchName, color: 'var(--dsw-alias-brand-primary)' }))
+  if (isBoundary) pills.push(React.createElement(TintPill, { key: 'upstream', text: upstream, color: 'var(--dsw-alias-state-warn-primary)' }))
+  if (isTargetBoundary) pills.push(React.createElement(TintPill, { key: 'target', text: targetBranch.name, color: 'var(--dsw-alias-state-warn-primary)' }))
   return React.createElement(
     'div',
     { style: { display: 'flex', flexDirection: 'column' } },
@@ -809,7 +955,15 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, onDispatch }
             toggle()
           }
         },
-        style: { display: 'flex', alignItems: 'stretch', gap: '8px', minHeight: '26px', padding: '0 6px 0 0', cursor: 'pointer' },
+        style: {
+          display: 'flex',
+          alignItems: 'stretch',
+          gap: '8px',
+          minHeight: '26px',
+          padding: '0 6px 0 0',
+          cursor: 'pointer',
+          ...(open ? { background: 'var(--dsw-alias-interactive-bg-hover)' } : {}),
+        },
       },
       React.createElement(
         'span',
@@ -833,18 +987,43 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, onDispatch }
           },
           (c.message || '').split('\n')[0],
         ),
-        isHead && branchName ? React.createElement(Pill, { text: branchName, color: 'var(--dsw-alias-brand-primary)' }) : null,
-        isBoundary ? React.createElement(Pill, { text: upstream, color: 'var(--dsw-alias-state-warn-primary)' }) : null,
+        pills.length > 0 ? pills : null,
+        pills.length === 0 && c.author
+          ? React.createElement(
+              'span',
+              {
+                title: c.author,
+                style: {
+                  fontSize: '11px',
+                  color: 'var(--dsw-alias-label-caption)',
+                  flex: 'none',
+                  maxWidth: '92px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                },
+              },
+              c.author,
+            )
+          : null,
       ),
       onDispatch && c.sha
         ? React.createElement(
             'button',
             {
               type: 'button',
-              className: 'dgw-linkicon',
+              className: 'dgw-linkicon dgw-copy',
               title: 'View this commit’s diff',
               'aria-label': 'View this commit’s diff',
-              style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', color: 'var(--dsw-alias-label-caption)' },
+              style: {
+                flex: 'none',
+                border: 'none',
+                background: 'none',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                color: 'var(--dsw-alias-label-caption)',
+                ...(open ? { opacity: 1 } : {}),
+              },
               onClick: (e) => {
                 if (e) e.stopPropagation()
                 onDispatch({ name: 'git-show', args: { sha: c.sha } })
@@ -875,8 +1054,15 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, onDispatch }
           Array.isArray(c.files) && c.files.length > 0
             ? React.createElement(
                 'div',
-                { style: { padding: '0 0 4px' } },
-                c.files.map((f) => React.createElement(CommitFileRow, { key: f.path, file: f })),
+                // 40px lands a depth-0 DirNode's chevron one indent step past
+                // the 24px the message and meta lines above use, so the files
+                // read as nested under the commit instead of flush with the
+                // graph line. (`.dgw-row`'s own -6px hover-bleed margin eats
+                // into whatever padding wraps it — see the matching note on
+                // Section's body wrapper in components.js — so this must be
+                // 6px more than the visual 34px target, not 34px itself.)
+                { style: { padding: '0 0 4px', paddingLeft: '40px' } },
+                React.createElement(FileTree, { files: c.files, onDispatch: null, viewMode: filesViewMode, onOpenDiff, activePath }),
               )
             : null,
         )
@@ -884,26 +1070,7 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, onDispatch }
   )
 }
 
-function CommitFileRow({ file }) {
-  return React.createElement(
-    Row,
-    { className: 'dgw-row', style: { padding: '1px 6px 1px 24px', gap: '6px' } },
-    React.createElement(
-      'span',
-      { style: { display: 'inline-flex', color: fileIconColor(file.status), flex: 'none' } },
-      React.createElement(IconCodeOutline16, { size: 12 }),
-    ),
-    React.createElement(
-      Code,
-      { style: { fontSize: '11px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } },
-      file.path,
-    ),
-    React.createElement(FileStats, { additions: file.additions, deletions: file.deletions }),
-    React.createElement(StatusChip, { status: file.status }),
-  )
-}
-
-function CommitGraph({ commits, branch, onDispatch }) {
+function CommitGraph({ commits, branch, targetBranch, filesViewMode, onDispatch, onOpenDiff, activePath }) {
   const ahead = branch && typeof branch.ahead === 'number' ? branch.ahead : 0
   const upstream = branch && branch.upstream ? branch.upstream : null
   const branchName = branch && branch.name ? branch.name : null
@@ -919,7 +1086,11 @@ function CommitGraph({ commits, branch, onDispatch }) {
         branchName,
         ahead,
         upstream,
+        targetBranch,
+        filesViewMode,
         onDispatch,
+        onOpenDiff,
+        activePath,
       }),
     ),
   )
@@ -953,49 +1124,187 @@ function ciRunId(check) {
   return m ? Number(m[1]) : null
 }
 
+function ciCheckId(check) {
+  const m = /\/actions\/runs\/\d+\/job\/(\d+)/.exec(String(check.url || ''))
+  return m ? Number(m[1]) : null
+}
+
+// Expanded detail for one check run: Status/Started/Completed, the
+// workflow-run and check-run ids parsed out of its GitHub Actions URL, and
+// Annotations/Jobs sub-sections. Annotations aren't part of the sampled
+// payload (fetching them for every check on every sample would multiply
+// GitHub API calls), so — like the row's own "Fetch failure logs" button —
+// the button here just dispatches the native command; the result lands as a
+// tool card in the conversation rather than rendering inline.
+function CheckDetailPanel({ check, onDispatch }) {
+  const runId = ciRunId(check)
+  const checkId = ciCheckId(check)
+  const fieldStyle = { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' }
+  const labelStyle = { fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--dsw-alias-label-caption)' }
+  return React.createElement(
+    'div',
+    {
+      style: {
+        margin: '2px 6px 8px 33px',
+        padding: '8px 10px',
+        borderRadius: '8px',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+      },
+    },
+    React.createElement(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+      React.createElement(
+        Code,
+        { style: { fontSize: '11.5px', flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+        check.name,
+      ),
+      check.url
+        ? React.createElement(
+            'a',
+            {
+              href: check.url,
+              target: '_blank',
+              rel: 'noreferrer',
+              style: { display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', textDecoration: 'none', flex: 'none' },
+              onClick: (e) => { if (e) e.stopPropagation() },
+            },
+            'View full details',
+            React.createElement(IconRightUpOutline16, { size: 12 }),
+          )
+        : null,
+    ),
+    React.createElement(
+      'div',
+      { style: { ...fieldStyle, display: 'flex', flexWrap: 'wrap', columnGap: '14px', rowGap: '2px' } },
+      React.createElement('span', null, 'Status: ', React.createElement('span', { style: { color: 'var(--dsw-alias-label-primary)' } }, checkLabel(check))),
+      check.startedAt ? React.createElement('span', null, `Started ${fmtTime(check.startedAt)}`) : null,
+      check.completedAt ? React.createElement('span', null, `Completed ${fmtTime(check.completedAt)}`) : null,
+    ),
+    runId || checkId
+      ? React.createElement(
+          'div',
+          { style: { ...fieldStyle, fontFamily: 'var(--dsw-font-family-code)', display: 'flex', gap: '16px' } },
+          runId ? React.createElement('span', null, `workflow #${runId}`) : null,
+          checkId ? React.createElement('span', null, `check #${checkId}`) : null,
+        )
+      : null,
+    React.createElement(
+      'div',
+      { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+      React.createElement('span', { style: labelStyle }, 'Annotations'),
+      onDispatch && checkId
+        ? React.createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'dgw-linkicon',
+              style: { width: 'auto', gap: '5px', padding: '0 4px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' },
+              title: "Fetch this check run's warning/error annotations",
+              onClick: (e) => {
+                if (e) e.stopPropagation()
+                onDispatch({ name: 'git-ci-annotations', args: { checkId } })
+              },
+            },
+            React.createElement(IconWarningOutline16, { size: 12 }),
+            'Fetch annotations',
+          )
+        : React.createElement(Muted, null, 'Not available for this check.'),
+    ),
+    React.createElement(
+      'div',
+      { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+      React.createElement('span', { style: labelStyle }, 'Jobs'),
+      React.createElement(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px' } },
+        React.createElement(
+          'span',
+          { style: { color: 'var(--dsw-alias-label-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+          check.name,
+        ),
+        React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, check.conclusion || check.status || ''),
+      ),
+    ),
+  )
+}
+
 function CheckRow({ check, onDispatch }) {
+  const [open, setOpen] = React.useState(false)
   const s = checkDotState(check)
   const runId = s === 'error' ? ciRunId(check) : null
+  const toggle = () => setOpen((v) => !v)
   return React.createElement(
-    Row,
-    { className: 'dgw-row', style: { gap: '8px', padding: '3px 6px' } },
+    'div',
+    null,
     React.createElement(
-      'span',
-      { className: 'dgw-chevron', style: { visibility: 'hidden' } },
-      React.createElement(IconChevronRightOutline14, { size: 13 }),
+      'div',
+      {
+        className: 'dgw-row',
+        role: 'button',
+        tabIndex: 0,
+        onClick: toggle,
+        onKeyDown: (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            toggle()
+          }
+        },
+        style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 6px', cursor: 'pointer' },
+      },
+      React.createElement(
+        'span',
+        { className: 'dgw-chevron', 'data-open': String(open) },
+        React.createElement(IconChevronRightOutline14, { size: 13 }),
+      ),
+      React.createElement(CheckIcon, { check }),
+      React.createElement(
+        'span',
+        { title: check.name, style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } },
+        check.name,
+      ),
+      React.createElement(
+        'span',
+        { style: { fontSize: '11px', color: s === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)', flex: 'none' } },
+        checkLabel(check),
+      ),
+      onDispatch && runId
+        ? React.createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'dgw-linkicon',
+              title: 'Fetch failure logs',
+              'aria-label': 'Fetch failure logs',
+              style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', color: 'var(--dsw-alias-state-error-primary)' },
+              onClick: (e) => {
+                if (e) e.stopPropagation()
+                onDispatch({ name: 'git-ci-logs', args: { runId } })
+              },
+            },
+            React.createElement(IconCodeOutline16, { size: 13 }),
+          )
+        : null,
+      check.url
+        ? React.createElement(
+            'a',
+            {
+              href: check.url,
+              target: '_blank',
+              rel: 'noreferrer',
+              className: 'dgw-linkicon',
+              'aria-label': 'Open check run',
+              title: 'Open check run',
+              onClick: (e) => { if (e) e.stopPropagation() },
+            },
+            React.createElement(IconRightUpOutline16, { size: 13 }),
+          )
+        : null,
     ),
-    React.createElement(CheckIcon, { check }),
-    React.createElement(
-      'span',
-      { title: check.name, style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } },
-      check.name,
-    ),
-    React.createElement(
-      'span',
-      { style: { fontSize: '11px', color: s === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)', flex: 'none' } },
-      checkLabel(check),
-    ),
-    onDispatch && runId
-      ? React.createElement(
-          'button',
-          {
-            type: 'button',
-            className: 'dgw-linkicon',
-            title: 'Fetch failure logs',
-            'aria-label': 'Fetch failure logs',
-            style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', color: 'var(--dsw-alias-state-error-primary)' },
-            onClick: () => onDispatch({ name: 'git-ci-logs', args: { runId } }),
-          },
-          React.createElement(IconCodeOutline16, { size: 13 }),
-        )
-      : null,
-    check.url
-      ? React.createElement(
-          'a',
-          { href: check.url, target: '_blank', rel: 'noreferrer', className: 'dgw-linkicon', 'aria-label': 'Open check run', title: 'Open check run' },
-          React.createElement(IconRightUpOutline16, { size: 13 }),
-        )
-      : null,
+    open ? React.createElement(CheckDetailPanel, { check, onDispatch }) : null,
   )
 }
 
@@ -1096,16 +1405,27 @@ function CommentsSection({ pr, comments, onDispatch, canComment }) {
   )
 }
 
-const MERGE_METHODS = [['merge', 'Merge'], ['squash', 'Squash'], ['rebase', 'Rebase']]
+const MERGE_METHODS = [
+  ['squash', 'Squash and merge'],
+  ['merge', 'Create a merge commit'],
+  ['rebase', 'Rebase and merge'],
+]
 
+// A prominent, un-sectioned merge CTA (mirroring GitHub's own PR page,
+// rather than tucking it inside a collapsible card): a split button whose
+// left half merges with the selected method and whose chevron half opens a
+// method picker plus a destructive Close PR entry. Approve/Request changes
+// and the delete-branch option stay underneath as secondary controls.
 function MergeReviewControls({ pr, state, onDispatch }) {
   const open = state === 'OPEN' && pr.merged !== true
   const [method, setMethod] = React.useState('squash')
   const [delBranch, setDelBranch] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
+  const [menuOpen, setMenuOpen] = React.useState(false)
   const act = (action) => {
     if (busy || !open || !onDispatch) return
     setBusy(true)
+    setMenuOpen(false)
     Promise.resolve(onDispatch(action)).finally(() => setBusy(false))
   }
   const reviewAction = (reviewState) => ({
@@ -1116,48 +1436,25 @@ function MergeReviewControls({ pr, state, onDispatch }) {
       ...(reviewState === 'REQUEST_CHANGES' ? {body: 'Please address the requested changes.'} : {}),
     },
   })
-  const mergeLabel =
-    method === 'merge' ? 'Merge' : method === 'squash' ? 'Squash and merge' : 'Rebase and merge'
+  const mergeLabel = (MERGE_METHODS.find(([id]) => id === method) || [null, 'Merge'])[1]
+  const merge = () =>
+    act({
+      name: 'git-pr-merge',
+      args: {number: pr.number, method, ...(delBranch ? {deleteBranch: true} : {})},
+      next: {name: 'git-refresh', args: {}},
+    })
+  const closePr = () =>
+    act({
+      name: 'git-pr-close',
+      args: {number: pr.number},
+      next: {name: 'git-refresh', args: {}},
+    })
   return React.createElement(
-    Section,
-    { title: 'Merge & review', defaultOpen: true },
+    'div',
+    { style: { display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'stretch', padding: '2px 2px 12px' } },
     React.createElement(
       'div',
-      { style: { display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'stretch' } },
-      React.createElement(
-        'div',
-        { role: 'group', 'aria-label': 'Merge method', style: { display: 'flex', flex: 'none' } },
-        MERGE_METHODS.map(([id, label]) =>
-          React.createElement(
-            'button',
-            {
-              key: id,
-              type: 'button',
-              disabled: !open,
-              'aria-pressed': method === id,
-              onClick: () => setMethod(id),
-              style: {
-                flex: '1 1 0',
-                height: '26px',
-                border: `1px solid ${method === id ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)'}`,
-                background: method === id ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)' : 'transparent',
-                color: method === id ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-secondary)',
-                fontFamily: 'var(--dsw-font-family)',
-                fontSize: '11px',
-                fontWeight: method === id ? 600 : 400,
-                cursor: open ? 'pointer' : 'default',
-              },
-            },
-            label,
-          ),
-        ),
-      ),
-      React.createElement(
-        'label',
-        { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', cursor: open ? 'pointer' : 'default', flex: 'none' } },
-        React.createElement('input', { type: 'checkbox', checked: delBranch, disabled: !open, onChange: (e) => setDelBranch(e.target.checked) }),
-        'Delete source branch',
-      ),
+      { style: { position: 'relative', display: 'flex', flex: 'none' } },
       React.createElement(
         'button',
         {
@@ -1165,26 +1462,68 @@ function MergeReviewControls({ pr, state, onDispatch }) {
           className: 'dgw-mergebtn',
           disabled: !open || busy,
           title: 'Merge this pull request with the selected method',
-          onClick: () =>
-            act({
-              name: 'git-pr-merge',
-              args: {number: pr.number, method, ...(delBranch ? {deleteBranch: true} : {})},
-              next: {name: 'git-refresh', args: {}},
-            }),
+          style: { borderRadius: '8px 0 0 8px' },
+          onClick: merge,
         },
         React.createElement(IconBranchOutline16, { size: 14 }),
         busy ? 'Working…' : mergeLabel,
       ),
       React.createElement(
-        'div',
-        { style: { display: 'flex', gap: '6px', flex: 'none' } },
-        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Approve this pull request', style: { flex: '1 1 0', width: 'auto' }, onClick: () => act(reviewAction('APPROVE')) }, 'Approve'),
-        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Request changes on this pull request', style: { flex: '1 1 0', width: 'auto', color: 'var(--dsw-alias-state-warn-primary)' }, onClick: () => act(reviewAction('REQUEST_CHANGES')) }, 'Request changes'),
+        'button',
+        {
+          type: 'button',
+          className: 'dgw-mergebtn',
+          disabled: !open || busy,
+          'aria-label': 'Choose merge method, or close this pull request',
+          title: 'Choose merge method, or close this pull request',
+          style: { flex: 'none', width: '32px', borderLeft: '1px solid rgba(255,255,255,0.35)', borderRadius: '0 8px 8px 0' },
+          onClick: () => setMenuOpen((v) => !v),
+        },
+        React.createElement(IconChevronRightOutline14, { size: 14, style: { transform: 'rotate(90deg)' } }),
       ),
-      !open
-        ? React.createElement(Muted, null, state === 'MERGED' ? 'Pull request is already merged.' : 'Merging and reviews are available while the pull request is open.')
+      menuOpen
+        ? React.createElement(
+            'div',
+            { className: 'dgw-actionmenu', style: { width: '210px' } },
+            MERGE_METHODS.map(([id, label]) =>
+              React.createElement(MenuItem, {
+                key: id,
+                label,
+                active: method === id,
+                onClick: () => {
+                  setMethod(id)
+                  setMenuOpen(false)
+                },
+              }),
+            ),
+            React.createElement('div', { className: 'dgw-actionsep' }),
+            React.createElement(MenuItem, {
+              label: 'Close pull request',
+              color: 'var(--dsw-alias-state-error-primary)',
+              onClick: closePr,
+            }),
+          )
         : null,
     ),
+    React.createElement(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' } },
+      React.createElement(
+        'label',
+        { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', cursor: open ? 'pointer' : 'default', flex: 'none' } },
+        React.createElement('input', { type: 'checkbox', checked: delBranch, disabled: !open, onChange: (e) => setDelBranch(e.target.checked) }),
+        'Delete source branch',
+      ),
+      React.createElement(
+        'div',
+        { style: { display: 'flex', gap: '6px', flex: 'none' } },
+        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Approve this pull request', style: { width: 'auto', padding: '0 10px' }, onClick: () => act(reviewAction('APPROVE')) }, 'Approve'),
+        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Request changes on this pull request', style: { width: 'auto', padding: '0 10px', color: 'var(--dsw-alias-state-warn-primary)' }, onClick: () => act(reviewAction('REQUEST_CHANGES')) }, 'Request changes'),
+      ),
+    ),
+    !open
+      ? React.createElement(Muted, null, state === 'MERGED' ? 'Pull request is already merged.' : 'Merging and reviews are available while the pull request is open.')
+      : null,
   )
 }
 
@@ -1351,15 +1690,39 @@ function ScTab({ data, refreshing, onDispatch, onOpenPr, onRefresh, canRefresh }
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [search, setSearch] = React.useState('')
   const [viewMode, setViewMode] = React.useState('tree')
+  const [commitFilesView, setCommitFilesView] = React.useState('tree')
   const toggleSearch = () =>
     setSearchOpen((v) => {
       if (v) setSearch('')
       return !v
     })
-  const ahead = typeof data.commitsAhead === 'number' ? data.commitsAhead : (data.branch && data.branch.ahead) || 0
+  // Every file tree in this tab (Changes, Committed on branch, Graph) shares
+  // one diff popup instead of each row expanding its own diff in place —
+  // `openDiff` is handed down as `onOpenDiff`, closed over the row's own
+  // `onDispatch` so the "Fetch full diff" CTA still dispatches correctly for
+  // writable trees and is simply absent for read-only ones.
+  const [activeDiff, setActiveDiff] = React.useState(null)
+  const openDiff = (file, dispatch) =>
+    setActiveDiff({
+      file,
+      onAskFull: dispatch ? () => dispatch({ name: 'git-diff', args: { path: file.path } }) : null,
+    })
+  const closeDiff = () => setActiveDiff(null)
+  const activePath = activeDiff ? activeDiff.file.path : null
+  const cmpBase = data.comparison && data.comparison.base ? data.comparison.base : null
+  const cmpAhead = data.comparison && typeof data.comparison.ahead === 'number' ? data.comparison.ahead : 0
   const cmpFiles = Array.isArray(data.comparison && data.comparison.files) ? data.comparison.files : []
   const filteredCmpFiles = filterFiles(cmpFiles, search)
   const commits = Array.isArray(data.commits) ? data.commits : []
+  // The PR's base is the branch we're actually merging into — strictly more
+  // meaningful than our own upstream. `comparison` only reflects it once the
+  // backend has resolved that base (see gitWorkspace's compareBase), so gate
+  // on the names matching rather than trusting comparison unconditionally.
+  const prBase = data.pullRequest && data.pullRequest.base ? data.pullRequest.base : null
+  const targetBranch =
+    prBase && data.comparison && data.comparison.base === prBase && typeof data.comparison.ahead === 'number'
+      ? { name: prBase, ahead: data.comparison.ahead }
+      : null
   return React.createElement(
     React.Fragment,
     null,
@@ -1381,25 +1744,36 @@ function ScTab({ data, refreshing, onDispatch, onOpenPr, onRefresh, canRefresh }
         defaultOpen: true,
         right: hasFiles ? React.createElement(ViewModeToggle, { mode: viewMode, onChange: setViewMode }) : null,
       },
-      React.createElement(ChangesBody, { data, onDispatch, search, viewMode }),
+      React.createElement(ChangesBody, { data, onDispatch, search, viewMode, onOpenDiff: openDiff, activePath }),
     ),
     React.createElement(
       Section,
       { title: 'Committed on branch', count: cmpFiles.length || null, defaultOpen: true },
       cmpFiles.length > 0
         ? filteredCmpFiles.length > 0
-          ? React.createElement(FileTree, { files: filteredCmpFiles, onDispatch: null, viewMode: 'tree' })
+          ? React.createElement(FileTree, { files: filteredCmpFiles, onDispatch: null, viewMode: 'tree', onOpenDiff: openDiff, activePath })
           : React.createElement(Muted, null, `No files match “${search}”.`)
-        : React.createElement(Muted, null, ahead > 0 ? 'Commit details are unavailable.' : 'No commits ahead of the upstream branch.'),
+        : React.createElement(
+            Muted,
+            null,
+            cmpBase
+              ? cmpAhead > 0
+                ? 'Commit details are unavailable.'
+                : `No commits ahead of ${cmpBase}.`
+              : 'No base branch to compare against.',
+          ),
     ),
     commits.length > 0
       ? React.createElement(
           Section,
           {
-            title: 'Commits',
+            title: 'Graph',
             count: commits.length,
             defaultOpen: true,
-            right:
+            right: React.createElement(
+              'span',
+              { style: { display: 'inline-flex', alignItems: 'center', gap: '2px' } },
+              React.createElement(GraphViewMenu, { mode: commitFilesView, onChange: setCommitFilesView }),
               onRefresh && canRefresh !== false
                 ? React.createElement(
                     IconActionBtn,
@@ -1407,8 +1781,16 @@ function ScTab({ data, refreshing, onDispatch, onOpenPr, onRefresh, canRefresh }
                     React.createElement(IconRefreshOutline14, { size: 13 }),
                   )
                 : null,
+            ),
           },
-          React.createElement(CommitGraph, { commits, branch: data.branch, onDispatch }),
+          React.createElement(CommitGraph, { commits, branch: data.branch, targetBranch, filesViewMode: commitFilesView, onDispatch, onOpenDiff: openDiff, activePath }),
+        )
+      : null,
+    activeDiff
+      ? React.createElement(
+          Modal,
+          { onClose: closeDiff },
+          React.createElement(DiffViewer, { file: activeDiff.file, onClose: closeDiff, onAskFull: activeDiff.onAskFull }),
         )
       : null,
   )

@@ -1,4 +1,5 @@
 import * as React from 'react'
+import * as ReactDOM from 'react-dom'
 import {
   Tooltip,
   StateDot,
@@ -76,8 +77,15 @@ export const STYLE_SHEET = [
   '.dgw-iconbtn:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}',
   '.dgw-row{position:relative;border-radius:6px;margin:0 -6px;padding:2px 6px;transition:background .1s ease}',
   '.dgw-row:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+  '.dgw-row[data-active="true"]{background:var(--dsw-alias-interactive-bg-hover-solid)}',
   '.dgw-copy{opacity:0;transition:opacity .12s ease}',
   '.dgw-row:hover .dgw-copy,.dgw-copy:focus-within{opacity:1}',
+  // The copy-path button sits in nearly every tree row; the shared 24px
+  // .dgw-iconbtn footprint was setting each row's min-height regardless of
+  // its 12-13px text, which read as excess space between files. Only shrink
+  // it where it's paired with .dgw-copy (i.e. CopyBtn), not other icon
+  // buttons (refresh, close) that still want the full touch target.
+  '.dgw-copy.dgw-iconbtn{width:20px;height:20px}',
   '.dgw-link{text-decoration:none}.dgw-link:hover{text-decoration:underline}',
   '.dgw-chevron{transition:transform .15s ease;flex:none;display:inline-flex;color:var(--dsw-alias-label-caption)}',
   '.dgw-chevron[data-open="true"]{transform:rotate(90deg)}',
@@ -104,13 +112,19 @@ export const STYLE_SHEET = [
   '.dgw-dock-open [data-git-workspace-drawer]{border-right:1px solid var(--dsw-alias-border-l2)}',
   '.dgw-filebtn{display:flex;align-items:center;gap:5px;cursor:pointer;font-family:var(--dsw-font-family)}',
   '.dgw-filebtn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}',
-  '.dgw-diff{border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);overflow:hidden;margin:2px 0 6px}',
-  '.dgw-diff-head{display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}',
-  '.dgw-diff-body{overflow-x:auto;overscroll-behavior-x:contain}',
+  '.dgw-diff{display:flex;flex-direction:column;min-height:0;flex:1 1 auto;background:var(--dsw-alias-bg-base)}',
+  '.dgw-diff-head{display:flex;align-items:center;gap:6px;padding:8px 10px;flex:none;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}',
+  '.dgw-diff-body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain}',
   '.dgw-diff-hunkhead{position:sticky;top:0;padding:1px 8px;font-family:var(--dsw-font-family-code);font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);white-space:nowrap}',
   '.dgw-diff-line{display:flex;align-items:flex-start;font-family:var(--dsw-font-family-code);font-size:11.5px;line-height:17px;min-width:max-content}',
   '.dgw-diff-gutter{flex:none;width:34px;padding-right:7px;box-sizing:border-box;text-align:right;color:var(--dsw-alias-label-caption);user-select:none}',
   '.dgw-diff-text{font-family:inherit;font-size:inherit;color:var(--dsw-alias-label-primary);white-space:pre;tab-size:4}',
+  '.dgw-diff-splitpane{display:flex;align-items:stretch}',
+  '.dgw-diff-splitcol{flex:1 1 0;min-width:0;overflow-x:auto}',
+  '.dgw-diff-splitcol+.dgw-diff-splitcol{border-left:1px solid var(--dsw-alias-border-l1)}',
+  '.dgw-diff-split-empty{background:var(--dsw-alias-bg-layer-2)}',
+  '.dgw-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:24px;z-index:1200}',
+  '.dgw-modal{width:100%;max-width:860px;max-height:calc(100vh - 48px);display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden}',
 ].join('\n')
 
 let stylesInjected = false
@@ -124,6 +138,40 @@ export function ensureStyles() {
     el.textContent = STYLE_SHEET
     document.head.appendChild(el)
   } catch {}
+}
+
+// A centered popup, portaled to `document.body` so it floats above the
+// drawer instead of fighting the tree's own scroll/clip context. Closes on
+// Escape or a backdrop click; a click inside the modal body is stopped from
+// bubbling to the backdrop.
+export function Modal({ onClose, maxWidth, children }) {
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  if (typeof document === 'undefined') return null
+  return ReactDOM.createPortal(
+    React.createElement(
+      'div',
+      { className: 'dgw-modal-backdrop', role: 'presentation', 'data-git-workspace-modal-backdrop': '', onClick: onClose },
+      React.createElement(
+        'div',
+        {
+          className: 'dgw-modal',
+          role: 'dialog',
+          'aria-modal': 'true',
+          onClick: (e) => e.stopPropagation(),
+          style: maxWidth ? { maxWidth } : undefined,
+        },
+        children,
+      ),
+    ),
+    document.body,
+  )
 }
 
 export function Card({ header, children }) {
@@ -266,6 +314,12 @@ export function Section({ icon, title, count, defaultOpen = true, right, plain =
       'button',
       {
         type: 'button',
+        // Same `.dgw-row` class (and the same 2px left padding a depth-0
+        // DirNode uses) as the tree rows in the body below, so the header's
+        // own chevron lines up with the tree's instead of drifting off by
+        // the row class's -6px hover-bleed margin, which only the body's
+        // rows were otherwise absorbing (see the body wrapper's padding).
+        className: 'dgw-row',
         onClick: () => setOpen((v) => !v),
         'aria-expanded': open,
         style: {
@@ -322,8 +376,12 @@ export function Section({ icon, title, count, defaultOpen = true, right, plain =
       React.createElement('span', { style: { flex: '1 1 auto' } }),
       right,
     ),
+    // No horizontal padding here — the header button above and every tree
+    // row below share the same `.dgw-row` class (and hence its -6px margin),
+    // so they only stay aligned if this wrapper doesn't add its own offset
+    // on top of theirs.
     open && children != null
-      ? React.createElement('div', { style: { padding: '0 2px 10px' } }, children)
+      ? React.createElement('div', { style: { padding: '0 0 10px' } }, children)
       : null,
   )
 }

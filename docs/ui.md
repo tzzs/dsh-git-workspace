@@ -90,6 +90,8 @@ src/client/
     │                         #   + portal-mounted right-side drawer + native-command refresh
     ├── drawer.js             # reusable side drawer: backdrop, ESC close, drag-resize,
     │                         #   width persistence, slide-in animation
+    ├── diff-viewer.js        # shared diff popup content: hunk header, Unified/Split
+    │                         #   toggle, unified and left/right split line rendering
     └── workspace-panel.js    # collapsible sections: changes (grouped staged/unstaged/
                               #   untracked with copy-path + stage controls), commits,
                               #   PR merge/review, plus the commit box and action menu
@@ -260,6 +262,14 @@ Source Control tab:
   for that exact path.
 - **Stage All / Unstage All** — header buttons that dispatch the same
   commands with `all:true`.
+- **Folder-level hover controls** — a directory row reveals, on hover, a
+  stage/unstage icon (`dirStageControl`) that dispatches `git-stage` /
+  `git-unstage` with every file under it in one call, and a discard icon
+  (`dirDiscardControl`) that dispatches `git-discard-paths` scoped to that
+  same file list. A file row gets the discard icon too (`fileDiscardControl`,
+  scoped to just its own path), alongside its existing Stage/Unstage button.
+  Both discard controls fire immediately on click — no separate confirm
+  dialog, same convention as the "Discard Changes" menu item below.
 - **Commit box** — a message textarea (Ctrl/Cmd+Enter submits) plus a primary
   button: it reads `Commit` when a message is typed and falls back to
   `Stage All` when empty.
@@ -277,30 +287,88 @@ Source Control tab:
   Changes (`git-discard`, the hard-reset command with confirm:true built in).
 - **Changes tree** — directory chains that hold nothing but a single child
   directory collapse into one row (e.g. `src` → `client` → `panel` renders as
-  `src/client/panel`), mirroring VS Code/GitLens folder compaction; each
-  file's icon is colored by its git status (modified/added/deleted/etc.)
-  instead of a flat caption color.
-- **Commit diff** — each row in the "Committed on branch" / "Commits" cards
-  is clickable and expands to show author, date, and short SHA (the HEAD
-  commit starts expanded); a small icon button on the row, which does not
-  trigger the row's expand/collapse, dispatches `/git-show {sha}` for that
-  commit.
+  `src/client/panel`), mirroring VS Code/GitLens folder compaction. File rows
+  carry the same generic file glyph as every other row (the primitives
+  package ships no per-extension icon set, so it's not type-specific, but its
+  absence read as a bigger problem — files sitting unaligned with their
+  sibling folders — than its sameness) but no chevron: a chevron implies an
+  inline expand/collapse that files don't do. `StatusChip` conveys the git
+  status (modified/added/deleted/etc.) via its letter and color, and the
+  active row (the file whose diff is currently open) is highlighted instead
+  via `data-active`. A folder row's own hover-revealed control
+  (`dirStageControl`) stages or unstages every file under it in one dispatch,
+  next to the per-file one (`fileStageControl`). Every tree in the Source
+  Control tab (Changes, Committed on branch, each Graph commit) shares one
+  diff popup — clicking a file row with patch data (see `hasPatch`:
+  non-empty `hunks`, or a `diffOmitted` reason) opens it in a centered modal
+  instead of expanding the row in place. `gitStatus` (`src/git/status.ts`)
+  passes `--untracked-files=all` so a directory that's untracked in full is
+  listed by its individual files, honoring `.gitignore`, rather than
+  collapsed to one entry ending in `/` (e.g. `.claude/`) the way git's
+  default `normal` mode reports it — the panel renders real leaf rows for it
+  instead of one opaque folder-shaped row. `buildTree` still strips a
+  trailing `/` from a path before splitting it into segments as a defensive
+  fallback (any caller that skips the `all` flag, or a future git default
+  change, would otherwise leave a trailing empty segment that renders as a
+  nameless file row).
+- **Diff viewer** — the popup defaults to a single unified column, with a
+  Unified/Split toggle in its header (`DiffModeToggle`, `diff-viewer.js`).
+  Split renders two side-by-side columns (`.dgw-diff-splitpane`); a hunk's
+  lines are paired left/right via `pairHunkRows` — context lines mirror onto
+  both sides, and a run of deletions zips against the run of additions that
+  follows it (GitHub-style), with a blank filler row on whichever side runs
+  short.
+- **Commit diff** — each row in the "Committed on branch" / "Graph" cards
+  is clickable and expands to show author, date, and short SHA; every other
+  row shows its author inline, right-aligned, without needing to expand. A
+  small icon button on the row, revealed on hover, dispatches `/git-show
+  {sha}` for that commit.
+- **Graph selection and refs** — HEAD and merge commits render as hollow
+  rings ("graph nodes"); expanding a row (the HEAD commit starts expanded)
+  fills its ring solid so the selected commit reads as distinct from the
+  rest. HEAD carries the current branch's pill; the commit at the upstream
+  ahead-count carries the upstream pill; when a pull request is open, the
+  commit at `comparison.ahead` also carries a pill for the PR's base branch
+  — `gitWorkspace` prefers that base branch over the branch's own upstream
+  when picking a comparison target (see `compareBase`, with a fallback to
+  `origin/<base>` when the base only exists as a remote-tracking ref), so
+  this lines up with the "Committed on branch" diff too. A "…" menu in the
+  Graph section header toggles whether every expanded commit's changed files
+  group by directory (Tree) or render flat (List).
 
 Pull Request tab:
 
-- **Merge & review card** — a Merge/Squash/Rebase segmented choice (defaults
-  to Squash) and a "Delete source branch" checkbox feed one big merge button
-  that dispatches `github_pr_merge` (`/git-pr-merge`) with `method` and, when
-  checked, `deleteBranch:true`. Below it, Approve and Request changes buttons
-  dispatch `github_pr_review` (`/git-pr-review`; `REQUEST_CHANGES` notes that a
-  review body is required). Both sections disable themselves once the PR is
-  merged or closed.
+- **Merge card** — a prominent, un-sectioned split button (mirroring GitHub's
+  own PR page rather than a collapsible card): the left half merges with the
+  selected method, dispatching `github_pr_merge` (`/git-pr-merge`) with
+  `method` and, when the "Delete source branch" checkbox is on,
+  `deleteBranch:true`. The chevron half opens a menu to switch method (Squash
+  and merge / Create a merge commit / Rebase and merge — picking one only
+  re-labels the button, it doesn't merge) or, below a separator, **Close pull
+  request**, which dispatches `github_pr_close` (`/git-pr-close`). Both merges
+  and closes chain a `/git-refresh` afterward. Approve and Request changes
+  buttons underneath dispatch `github_pr_review` (`/git-pr-review`;
+  `REQUEST_CHANGES` requires a review body). All of it disables itself once
+  the PR is merged or closed.
 - **Full diff** — an icon button next to the PR stat line dispatches
   `/git-pr-diff {number}`.
-- **CI logs** — a failing check row in the Checks card carries a "Fetch
-  failure logs" icon button that dispatches `/git-ci-logs {runId}`. `runId`
-  is parsed from the check's URL (`/actions/runs/(\d+)`); checks without a
-  GitHub Actions-shaped URL (or that aren't failing) don't show the button.
+- **Checks card** — each check row expands (chevron) to show Status /
+  Started / Completed, the workflow-run and check-run ids parsed out of the
+  check's GitHub Actions URL (`/actions/runs/(\d+)/job/(\d+)`), a "View full
+  details" link to GitHub, an Annotations sub-section, and a Jobs sub-section
+  (synthesized from the check's own name/conclusion — GitHub Actions checks
+  are already job-granular, so there's nothing further to fetch). A failing
+  row also carries a "Fetch failure logs" icon button dispatching
+  `/git-ci-logs {runId}`; the Annotations sub-section carries a "Fetch
+  annotations" button dispatching `github_ci_annotations`
+  (`/git-ci-annotations {checkId}`). Like every other on-demand fetch in this
+  panel, these two just dispatch the native command — the result lands as a
+  tool card in the conversation, not inline in the row (see "zero
+  chat/agent-turn entry points" below: dispatching is not the same as
+  rendering the result here). `gitWorkspace` prefers the PR's own job-level
+  checks (`github_ci` scoped to the PR number) over the branch's coarser run
+  history whenever a PR is open, so this detail is populated from the same
+  sampled `data.ci.checks` the row list already renders from.
 - **Comment composer** — a textarea + Comment button that dispatches
   `/git-pr-comment` with the PR number and body.
 
@@ -328,8 +396,10 @@ Write commands (the mutation paths the panel exposes):
 | `git_checkout` | `git-checkout` | |
 | `git_merge` | `git-merge` | |
 | `git_reset` | `git-discard` | Partial — hard-reset to HEAD only, `confirm:true` baked in; no `mode`/`ref` surface |
+| `git_discard_paths` | `git-discard-paths` | Path-scoped discard (`git restore` for tracked changes, `git clean` for untracked), `confirm:true` baked in |
 | `github_pr_create` | `git-pr-create` | |
 | `github_pr_merge` | `git-pr-merge` | |
+| `github_pr_close` | `git-pr-close` | |
 | `github_pr_comment` | `git-pr-comment` | |
 | `github_pr_review` | `git-pr-review` | |
 | — (composite) | `git-commit-push`, `git-commit-sync`, `git-sync` | stage→commit→push / commit→ff→push chains |
@@ -361,6 +431,7 @@ a button, `toolCommand` already wraps the tool):
 | `github_pr_comments` | `git-pr-comments` | — (the panel renders comments from the sampled meta) |
 | `github_ci` | `git-ci` | — (the panel renders check status from the sampled meta) |
 | `github_ci_logs` | `git-ci-logs` | Failing check rows' "Fetch failure logs" icon button (PR tab); `runId` is parsed from the check's `/actions/runs/(\d+)` URL, so only checks with a GitHub Actions URL show the button |
+| `github_ci_annotations` | `git-ci-annotations` | Each expanded check row's "Fetch annotations" button (PR tab); `checkId` is parsed from the check's `/actions/runs/\d+/job/(\d+)` URL |
 | `github_issue` | `git-issue` | — |
 | `github_issue_comments` | `git-issue-comments` | — |
 | `github_releases` | `git-releases` | — |
