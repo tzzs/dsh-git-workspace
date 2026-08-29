@@ -174,6 +174,71 @@ export function Modal({ onClose, maxWidth, children }) {
   )
 }
 
+// A `.dgw-actionmenu` portaled to `document.body` and positioned from the
+// trigger's own `getBoundingClientRect()` (`position:fixed`, not the CSS
+// class's default `position:absolute;right:0`) instead of relying on a CSS
+// ancestor being the right positioning context — a small header nested
+// inside another positioned/scrolling ancestor (e.g. a Section header) can't
+// reliably provide that, and got the menu rendered in the wrong place.
+// Closes on Escape, a click outside, or scroll (rather than tracking scroll
+// to reposition, which risks the menu drifting from its trigger).
+export function DropdownMenu({ anchorRef, onClose, align = 'end', style, children }) {
+  const [rect, setRect] = React.useState(null)
+  React.useEffect(() => {
+    const el = anchorRef && anchorRef.current
+    if (el && typeof el.getBoundingClientRect === 'function') setRect(el.getBoundingClientRect())
+  }, [anchorRef])
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onClose, true)
+    window.addEventListener('resize', onClose)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onClose, true)
+      window.removeEventListener('resize', onClose)
+    }
+  }, [onClose])
+  if (typeof document === 'undefined') return null
+  // Falls back to a 0,0 anchor (rather than bailing out) when there's no
+  // real DOM to measure — keeps this testable without a browser, and still
+  // renders *something* sane if a ref somehow never attaches in production.
+  const r = rect || { top: 0, bottom: 0, left: 0, right: 0 }
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0
+  return ReactDOM.createPortal(
+    React.createElement(
+      React.Fragment,
+      null,
+      React.createElement('div', {
+        style: { position: 'fixed', inset: 0, zIndex: 1199 },
+        'data-git-workspace-dropdown-backdrop': '',
+        onClick: onClose,
+      }),
+      React.createElement(
+        'div',
+        {
+          className: 'dgw-actionmenu',
+          style: {
+            position: 'fixed',
+            top: `${r.bottom + 8}px`,
+            zIndex: 1200,
+            ...(align === 'end'
+              ? { right: `${Math.max(0, viewportWidth - r.right)}px` }
+              : { left: `${r.left}px` }),
+            ...(style || {}),
+          },
+          onClick: (e) => e.stopPropagation(),
+        },
+        children,
+      ),
+    ),
+    document.body,
+  )
+}
+
 export function Card({ header, children }) {
   return React.createElement(
     'div',

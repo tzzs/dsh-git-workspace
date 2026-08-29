@@ -93,8 +93,8 @@ src/client/
     ├── diff-viewer.js        # shared diff popup content: hunk header, Unified/Split
     │                         #   toggle, unified and left/right split line rendering
     └── workspace-panel.js    # collapsible sections: changes (grouped staged/unstaged/
-                              #   untracked with copy-path + stage controls), commits,
-                              #   PR merge/review, plus the commit box and action menu
+                              #   untracked with hover stage/unstage/discard controls),
+                              #   commits, PR merge/review, plus the commit box and menu
 ```
 
 ## Data flow
@@ -257,19 +257,17 @@ the panel. When native commands are unavailable, the panel disables itself
 
 Source Control tab:
 
-- **Per-file Stage/Unstage** — every row in the Changes and Untracked cards
-  carries a `Stage`/`Unstage` button that dispatches `git-stage`/`git-unstage`
-  for that exact path.
-- **Stage All / Unstage All** — header buttons that dispatch the same
-  commands with `all:true`.
-- **Folder-level hover controls** — a directory row reveals, on hover, a
-  stage/unstage icon (`dirStageControl`) that dispatches `git-stage` /
-  `git-unstage` with every file under it in one call, and a discard icon
-  (`dirDiscardControl`) that dispatches `git-discard-paths` scoped to that
-  same file list. A file row gets the discard icon too (`fileDiscardControl`,
-  scoped to just its own path), alongside its existing Stage/Unstage button.
-  Both discard controls fire immediately on click — no separate confirm
-  dialog, same convention as the "Discard Changes" menu item below.
+- **Per-row hover actions** (`stageDiscardActions`) — every file and folder
+  row in the Changes tree reveals, on hover, one coherent action set instead
+  of a copy-path shortcut this row doesn't need: if every file (the file
+  itself, or every file under that folder) is already staged, just an
+  Unstage icon; otherwise, Discard + Stage side by side. A folder's controls
+  dispatch `git-stage` / `git-unstage` / `git-discard-paths` with every file
+  under it in one call; a file's controls are scoped to just its own path.
+  Discard fires `git-discard-paths` immediately on click — no separate
+  confirm dialog, same convention as the "Discard Changes" menu item below.
+- **Stage All / Unstage All** — header buttons that dispatch `git-stage` /
+  `git-unstage` with `all:true`.
 - **Commit box** — a message textarea (Ctrl/Cmd+Enter submits) plus a primary
   button: it reads `Commit` when a message is typed and falls back to
   `Stage All` when empty.
@@ -295,10 +293,7 @@ Source Control tab:
   inline expand/collapse that files don't do. `StatusChip` conveys the git
   status (modified/added/deleted/etc.) via its letter and color, and the
   active row (the file whose diff is currently open) is highlighted instead
-  via `data-active`. A folder row's own hover-revealed control
-  (`dirStageControl`) stages or unstages every file under it in one dispatch,
-  next to the per-file one (`fileStageControl`). Every tree in the Source
-  Control tab (Changes, Committed on branch, each Graph commit) shares one
+  via `data-active`. Every tree in the Source
   diff popup — clicking a file row with patch data (see `hasPatch`:
   non-empty `hunks`, or a `diffOmitted` reason) opens it in a centered modal
   instead of expanding the row in place. `gitStatus` (`src/git/status.ts`)
@@ -333,8 +328,15 @@ Source Control tab:
   when picking a comparison target (see `compareBase`, with a fallback to
   `origin/<base>` when the base only exists as a remote-tracking ref), so
   this lines up with the "Committed on branch" diff too. A "…" menu in the
-  Graph section header toggles whether every expanded commit's changed files
-  group by directory (Tree) or render flat (List).
+  Graph section header (`GraphViewMenu`) offers one toggle row — labeled for
+  the mode a click switches *to* ("View as List" while in tree mode, "View
+  as Tree" while in list mode) — that changes whether every expanded
+  commit's changed files group by directory or render flat, plus a "Refresh
+  branch compare" row (folded in here instead of a separate icon). It's
+  rendered through `DropdownMenu` (`components.js`), a portal positioned
+  from the trigger's own `getBoundingClientRect()` rather than a CSS
+  ancestor — a header nested this deep can't reliably provide that
+  positioning context itself.
 
 Pull Request tab:
 

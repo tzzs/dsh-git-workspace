@@ -19,10 +19,10 @@ import {
   Stat,
   Muted,
   Dot,
-  CopyBtn,
   IconBtn,
   Section,
   Modal,
+  DropdownMenu,
   checkDotState,
 } from '../components.js'
 import { DiffViewer } from './diff-viewer.js'
@@ -112,10 +112,11 @@ function SearchIcon({ size = 13 }) {
 
 // A button-shaped control that is safe to nest inside `Section`'s header
 // <button> (a real <button> there gets reparented out by the HTML parser).
-function IconActionBtn({ title, onClick, tone, children }) {
+function IconActionBtn({ title, onClick, tone, elRef, children }) {
   return React.createElement(
     'span',
     {
+      ref: elRef,
       role: 'button',
       tabIndex: 0,
       className: 'dgw-linkicon',
@@ -259,8 +260,7 @@ function DirNode({ dir, depth, onDispatch, onOpenDiff, activePath }) {
       ),
       React.createElement(Muted, null, String(treeSize(dir))),
       React.createElement('span', { style: { flex: '1 1 auto' } }),
-      dirDiscardControl(dir, onDispatch),
-      dirStageControl(dir, onDispatch),
+      onDispatch ? stageDiscardActions(collectDirFiles(dir), onDispatch, DIR_STAGE_LABELS) : null,
     ),
     open ? React.createElement(TreeNodeRows, { node: dir, depth: depth + 1, onDispatch, onOpenDiff, activePath }) : null,
   )
@@ -373,32 +373,54 @@ function MenuItem({ label, active, color, onClick }) {
   )
 }
 
-function GraphViewMenu({ mode, onChange }) {
+// Was two always-both-visible "View as Tree" / "View as List" rows (plus a
+// separate icon button elsewhere for refresh); the reference design is one
+// toggle row that reads as the *other* mode (what clicking it switches to)
+// plus refresh folded into the same menu, so this now takes onRefresh too
+// and the Graph section header no longer renders its own refresh icon.
+function GraphViewMenu({ mode, onChange, onRefresh, refreshing }) {
   const [open, setOpen] = React.useState(false)
-  const pick = (id) => {
-    onChange(id)
-    setOpen(false)
-  }
+  const anchorRef = React.useRef(null)
+  const close = () => setOpen(false)
+  const otherMode = mode === 'tree' ? 'list' : 'tree'
   return React.createElement(
     'span',
-    { style: { position: 'relative', display: 'inline-flex' } },
+    { style: { display: 'inline-flex' } },
     React.createElement(
       IconActionBtn,
-      { title: 'Commit file view options', onClick: () => setOpen((v) => !v) },
+      { title: 'Commit file view options', onClick: () => setOpen((v) => !v), elRef: anchorRef },
       React.createElement(IconChevronRightOutline14, { size: 13, style: { transform: 'rotate(90deg)' } }),
     ),
     open
       ? React.createElement(
-          'div',
-          // `.dgw-actionmenu`'s own width (240px, sized for the longer Git
-          // action labels) is both too wide and, combined with its
-          // overflow-y:auto implicitly making overflow-x:auto too (a CSS
-          // rule when only one axis is non-visible), any *narrower* fixed
-          // guess risks clipping this menu's own text with a scrollbar.
-          // Size to content instead, with a sane min/max.
-          { className: 'dgw-actionmenu', style: { width: 'max-content', minWidth: '150px', maxWidth: '220px', whiteSpace: 'nowrap', boxSizing: 'border-box' } },
-          React.createElement(MenuItem, { label: 'View as Tree', active: mode === 'tree', onClick: () => pick('tree') }),
-          React.createElement(MenuItem, { label: 'View as List', active: mode === 'list', onClick: () => pick('list') }),
+          DropdownMenu,
+          {
+            anchorRef,
+            onClose: close,
+            // `.dgw-actionmenu`'s own width (240px, sized for the longer Git
+            // action labels) is both too wide and, combined with its
+            // overflow-y:auto implicitly making overflow-x:auto too (a CSS
+            // rule when only one axis is non-visible), any *narrower* fixed
+            // guess risks clipping this menu's own text with a scrollbar.
+            // Size to content instead, with a sane min/max.
+            style: { width: 'max-content', minWidth: '150px', maxWidth: '220px', whiteSpace: 'nowrap', boxSizing: 'border-box' },
+          },
+          React.createElement(MenuItem, {
+            label: otherMode === 'list' ? 'View as List' : 'View as Tree',
+            onClick: () => {
+              onChange(otherMode)
+              close()
+            },
+          }),
+          onRefresh
+            ? React.createElement(MenuItem, {
+                label: refreshing ? 'Refreshing…' : 'Refresh branch compare',
+                onClick: () => {
+                  onRefresh()
+                  close()
+                },
+              })
+            : null,
         )
       : null,
   )
@@ -425,90 +447,40 @@ function hasPatch(file) {
   )
 }
 
-function fileStageControl(file, onDispatch) {
-  if (!onDispatch) return null
-  const staged = file.staged === true
-  const action = staged
-    ? {name: 'git-unstage', args: {paths: [file.path]}}
-    : {name: 'git-stage', args: {paths: [file.path]}}
-  return React.createElement(
-    'span',
-    { onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
-    React.createElement(
-      'button',
-      {
-        type: 'button',
-        title: staged ? 'Unstage this file' : 'Stage this file',
-        onClick: () => onDispatch(action),
-        style: {
-          border: 'none',
-          background: 'none',
-          padding: '0 2px',
-          cursor: 'pointer',
-          fontFamily: 'var(--dsw-font-family)',
-          fontSize: '10px',
-          lineHeight: '15px',
-          fontWeight: 600,
-          color: staged ? 'var(--dsw-alias-label-caption)' : 'var(--dsw-alias-state-success-primary)',
-          whiteSpace: 'nowrap',
-        },
-      },
-      staged ? 'Unstage' : 'Stage',
-    ),
-  )
-}
-
-// A folder-level counterpart to `fileStageControl`, revealed on hover (same
-// `.dgw-copy` opacity trick as the per-row copy-path button) — stages or
-// unstages every file under this directory in one dispatch instead of
-// clicking each one individually.
-function dirStageControl(dir, onDispatch) {
-  if (!onDispatch) return null
-  const files = collectDirFiles(dir)
-  if (files.length === 0) return null
-  const allStaged = files.every((f) => f.staged === true)
-  const action = allStaged
-    ? { name: 'git-unstage', args: { paths: files.map((f) => f.path) } }
-    : { name: 'git-stage', args: { paths: files.map((f) => f.path) } }
+function hoverActionBtn(label, onClick, Icon) {
   return React.createElement(
     'span',
     { className: 'dgw-copy', onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
-    React.createElement(
-      IconBtn,
-      { label: allStaged ? 'Unstage all files in this folder' : 'Stage all files in this folder', onClick: () => onDispatch(action) },
-      React.createElement(allStaged ? IconCheckOutline14 : IconPlusOutline16, { size: 13 }),
-    ),
+    React.createElement(IconBtn, { label, onClick }, React.createElement(Icon, { size: 13 })),
   )
 }
 
-// Shared by `fileDiscardControl` and `dirDiscardControl` — permanently
-// reverts (tracked) or removes (untracked) every given path via
-// `git-discard-paths`. No client-side confirm dialog, matching the existing
-// "Discard Changes" menu item (`git-discard`), which also dispatches
-// immediately: the deliberate hover + click on a destructive-looking icon
-// *is* the confirmation step here.
-function discardControl(paths, onDispatch, label) {
-  if (!onDispatch || paths.length === 0) return null
+// The hover action set for a file or folder row (VS Code's SCM row actions,
+// not a copy-path shortcut this row doesn't otherwise need): every path
+// already staged shows a single Unstage control; otherwise (any
+// unstaged/mixed — a folder mixing staged and unstaged files counts as "not
+// yet fully staged") shows Discard + Stage side by side. `files` is the
+// single file itself, or every file under a folder (`collectDirFiles`).
+// Discard dispatches `git-discard-paths` immediately, no client-side confirm
+// dialog — matching the existing "Discard Changes" menu item (`git-discard`),
+// where the deliberate hover + click on a destructive-looking icon *is* the
+// confirmation step.
+function stageDiscardActions(files, onDispatch, labels) {
+  if (!onDispatch || files.length === 0) return null
+  const paths = files.map((f) => f.path)
+  if (files.every((f) => f.staged === true)) {
+    return hoverActionBtn(labels.unstage, () => onDispatch({ name: 'git-unstage', args: { paths } }), IconCheckOutline14)
+  }
   return React.createElement(
-    'span',
-    { className: 'dgw-copy', onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
-    React.createElement(
-      IconBtn,
-      { label, onClick: () => onDispatch({ name: 'git-discard-paths', args: { paths } }) },
-      React.createElement(IconRefreshOutline14, { size: 13 }),
-    ),
+    React.Fragment,
+    null,
+    hoverActionBtn(labels.discard, () => onDispatch({ name: 'git-discard-paths', args: { paths } }), IconRefreshOutline14),
+    hoverActionBtn(labels.stage, () => onDispatch({ name: 'git-stage', args: { paths } }), IconPlusOutline16),
   )
 }
 
-function fileDiscardControl(file, onDispatch) {
-  return discardControl([file.path], onDispatch, 'Discard changes to this file')
-}
-
-function dirDiscardControl(dir, onDispatch) {
-  if (!onDispatch) return null
-  const files = collectDirFiles(dir)
-  return discardControl(files.map((f) => f.path), onDispatch, 'Discard changes in this folder')
-}
+const FILE_STAGE_LABELS = { discard: 'Discard changes to this file', stage: 'Stage this file', unstage: 'Unstage this file' }
+const DIR_STAGE_LABELS = { discard: 'Discard folder', stage: 'Stage folder', unstage: 'Unstage folder' }
 
 function fileIconColor(status) {
   return (STATUS_LETTER[status] && STATUS_LETTER[status].color) || 'var(--dsw-alias-label-caption)'
@@ -534,16 +506,10 @@ function FileTreeRow({ file, depth, onDispatch, onOpenDiff, activePath }) {
     React.createElement(Code, { key: 'name', style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
     React.createElement(FileStats, { key: 'stats', additions: file.additions, deletions: file.deletions }),
     React.createElement(StatusChip, { key: 'status', status: file.status }),
-    fileStageControl(file, onDispatch),
-    fileDiscardControl(file, onDispatch),
+    React.createElement('span', { key: 'stage-actions' }, stageDiscardActions([file], onDispatch, FILE_STAGE_LABELS)),
   ]
   if (!clickable) {
-    return React.createElement(
-      Row,
-      { className: 'dgw-row', style: rowStyle },
-      ...rowChildren,
-      React.createElement(CopyBtn, { key: 'copy', text: file.path, label: 'Copy path' }),
-    )
+    return React.createElement(Row, { className: 'dgw-row', style: rowStyle }, ...rowChildren)
   }
   const open = () => onOpenDiff(file, onDispatch)
   return React.createElement(
@@ -565,11 +531,6 @@ function FileTreeRow({ file, depth, onDispatch, onOpenDiff, activePath }) {
       style: rowStyle,
     },
     ...rowChildren,
-    React.createElement(
-      'span',
-      { key: 'copy', className: 'dgw-copy', onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
-      React.createElement(CopyBtn, { text: file.path, label: 'Copy path' }),
-    ),
   )
 }
 
@@ -1770,18 +1731,12 @@ function ScTab({ data, refreshing, onDispatch, onOpenPr, onRefresh, canRefresh }
             title: 'Graph',
             count: commits.length,
             defaultOpen: true,
-            right: React.createElement(
-              'span',
-              { style: { display: 'inline-flex', alignItems: 'center', gap: '2px' } },
-              React.createElement(GraphViewMenu, { mode: commitFilesView, onChange: setCommitFilesView }),
-              onRefresh && canRefresh !== false
-                ? React.createElement(
-                    IconActionBtn,
-                    { title: 'Refresh', onClick: onRefresh, tone: refreshing ? 'var(--dsw-alias-brand-primary)' : undefined },
-                    React.createElement(IconRefreshOutline14, { size: 13 }),
-                  )
-                : null,
-            ),
+            right: React.createElement(GraphViewMenu, {
+              mode: commitFilesView,
+              onChange: setCommitFilesView,
+              onRefresh: canRefresh !== false ? onRefresh : null,
+              refreshing,
+            }),
           },
           React.createElement(CommitGraph, { commits, branch: data.branch, targetBranch, filesViewMode: commitFilesView, onDispatch, onOpenDiff: openDiff, activePath }),
         )

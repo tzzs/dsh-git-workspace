@@ -699,20 +699,27 @@ function interactiveHeader(conversation, { ctxExtras = {}, compProps = {} } = {}
     const drawerEl = portal && portal.el ? portal.el : null
     let body = null
     let diffModal = null
+    let dropdownMenu = null
     if (drawerEl) {
       const aside = runComponent(drawerEl.type, drawerEl.props)
       const panelEl = aside.children[2].children[0]
       body = runComponent(panelEl.type, panelEl.props)
-      // The shared diff popup (see ScTab) is itself another `ReactDOM.createPortal`
-      // call, mocked the same way as the drawer's — find its element in the
-      // tab's tree, render it, and unwrap the mock portal to get its content.
+      // The shared diff popup (see ScTab) and any open DropdownMenu (e.g.
+      // GraphViewMenu) are each another `ReactDOM.createPortal` call, mocked
+      // the same way as the drawer's — find the element in the tab's tree,
+      // render it, and unwrap the mock portal to get its content.
       const modalNode = findEls(body, (el) => el.type && el.type.name === 'Modal')[0]
       if (modalNode) {
         const modalPortal = runComponent(modalNode.type, modalNode.props)
         diffModal = modalPortal && modalPortal.el ? modalPortal.el : null
       }
+      const dropdownNode = findEls(body, (el) => el.type && el.type.name === 'DropdownMenu')[0]
+      if (dropdownNode) {
+        const dropdownPortal = runComponent(dropdownNode.type, dropdownNode.props)
+        dropdownMenu = dropdownPortal && dropdownPortal.el ? dropdownPortal.el : null
+      }
     }
-    return { tree, drawerEl, body, diffModal }
+    return { tree, drawerEl, body, diffModal, dropdownMenu }
   }
   const walk = (node, fn, depth = 0) => {
     if (depth > 60 || node === null || node === undefined || typeof node !== 'object') return
@@ -952,11 +959,66 @@ test('a folder row\'s hover control stages every file under it in one dispatch, 
   // read directly off the Tooltip element's `children` prop instead of via
   // another `findEls` pass (same pattern the diff popup's close-button test
   // above uses).
-  const stageDirTip = ui.findEls(body, (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === 'Stage all files in this folder')[0]
+  const stageDirTip = ui.findEls(body, (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === 'Stage folder')[0]
   assert.ok(stageDirTip, 'unstaged folder shows a stage-all-in-folder control')
   const stageDirBtn = Array.isArray(stageDirTip.props.children) ? stageDirTip.props.children[0] : stageDirTip.props.children
   await stageDirBtn.props.onClick()
   assert.deepEqual(mock.commands, ['/git-stage {"paths":["src/a.ts","src/b.ts"]}'], 'stages every file under the folder in one dispatch')
+})
+
+test('the Graph section\'s view menu renders as a portal, toggles to the other mode, and folds refresh in', async () => {
+  const mock = sessionMock()
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: null,
+          ci: null,
+          commits: [{ sha: 'aaa1111111', shortSha: 'aaa1111', message: 'first', author: 'me', date: '2024-01-03T00:00:00Z' }],
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation, {
+    ctxExtras: {
+      get(name) {
+        if (name !== 'sessions') return undefined
+        return { binding: () => ({ session: mock.session }) }
+      },
+    },
+  })
+  let { body, dropdownMenu } = ui.render()
+  assert.equal(dropdownMenu, null, 'closed by default')
+  const trigger = ui.findEls(body, (el) => el.props && el.props['aria-label'] === 'Commit file view options')[0]
+  assert.ok(trigger, 'the Graph section renders its view-mode trigger')
+  assert.equal(
+    ui.findEls(body, (el) => el.props && el.props['aria-label'] === 'Refresh').length,
+    0,
+    'no separate refresh icon next to the trigger — it is folded into the menu instead',
+  )
+  trigger.props.onClick({ stopPropagation() {} })
+  ;({ dropdownMenu } = ui.render())
+  // Rendered through the same mock-portal path as the diff popup (see
+  // `render()` above) — not found by walking `body`, which is exactly the
+  // point: it must not depend on a CSS ancestor inside the section header
+  // for its positioning.
+  assert.ok(dropdownMenu, 'opens as a portal rather than an inline dropdown')
+  const findItem = (text) => ui.findEls(dropdownMenu, (el) => el.type === 'span' && el.props && el.props.role === 'button' && ownText(el).includes(text))[0]
+  const viewItem = findItem('View as List')
+  assert.ok(viewItem, 'defaults to tree mode, so the one toggle row reads "View as List" (the mode a click switches to)')
+  assert.ok(findItem('Refresh branch compare'), 'refresh is folded into this menu instead of a separate icon button')
+  viewItem.props.onClick()
+  ;({ dropdownMenu } = ui.render())
+  assert.equal(dropdownMenu, null, 'picking a mode closes the menu')
 })
 
 test('the discard hover controls dispatch git-discard-paths scoped to the folder or the single file', async () => {
@@ -998,7 +1060,7 @@ test('the discard hover controls dispatch git-discard-paths scoped to the folder
     assert.ok(tip, `${label} control renders`)
     return Array.isArray(tip.props.children) ? tip.props.children[0] : tip.props.children
   }
-  await findBtn('Discard changes in this folder').props.onClick()
+  await findBtn('Discard folder').props.onClick()
   await findBtn('Discard changes to this file').props.onClick()
   assert.deepEqual(
     mock.commands,
@@ -1008,6 +1070,52 @@ test('the discard hover controls dispatch git-discard-paths scoped to the folder
     ],
     'the folder control discards every file under it, the file control only its own path',
   )
+})
+
+test('a fully staged file or folder offers only Unstage on hover — no Discard, no Stage, no copy-path', async () => {
+  const mock = sessionMock()
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 2, deleted: 0, renamed: 0, untracked: 0 },
+          clean: false,
+          pullRequest: null,
+          ci: null,
+          files: [
+            { path: 'src/a.ts', oldPath: null, status: 'modified', staged: true },
+            { path: 'src/b.ts', oldPath: null, status: 'modified', staged: true },
+          ],
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation, {
+    ctxExtras: {
+      get(name) {
+        if (name !== 'sessions') return undefined
+        return { binding: () => ({ session: mock.session }) }
+      },
+    },
+  })
+  const { body } = ui.render()
+  const tipLabels = ui.findEls(body, (el) => el.type && el.type.stubName === 'Tooltip').map((el) => el.props.label)
+  assert.ok(tipLabels.includes('Unstage folder'), 'the fully staged folder offers Unstage')
+  assert.ok(tipLabels.includes('Unstage this file'), 'a fully staged file offers Unstage')
+  assert.ok(!tipLabels.includes('Discard folder') && !tipLabels.includes('Stage folder'), 'no Discard/Stage once the whole folder is staged')
+  assert.ok(!tipLabels.includes('Discard changes to this file') && !tipLabels.includes('Stage this file'), 'no Discard/Stage once the file is staged')
+  assert.ok(!tipLabels.includes('Copy path'), 'copy-path is no longer one of the row hover controls')
+  const unstageTip = ui.findEls(body, (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === 'Unstage folder')[0]
+  const unstageBtn = Array.isArray(unstageTip.props.children) ? unstageTip.props.children[0] : unstageTip.props.children
+  await unstageBtn.props.onClick()
+  assert.deepEqual(mock.commands, ['/git-unstage {"paths":["src/a.ts","src/b.ts"]}'], 'unstaging the folder targets every staged file under it')
 })
 
 test('an untracked directory reported by git as a single "dir/" entry renders as one row, not a nameless child', () => {
