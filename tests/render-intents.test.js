@@ -20,11 +20,13 @@ const names = [
   'git_stash',
   'git_tags',
   'github_pr',
+  'github_pr_create',
   'github_pr_diff',
   'github_pr_reviews',
   'github_pr_comments',
   'github_ci',
   'github_ci_logs',
+  'github_ci_annotations',
   'github_issue',
   'github_issue_comments',
   'github_releases',
@@ -55,6 +57,8 @@ function argsFor(name) {
       return { number: 1 }
     case 'github_ci_logs':
       return { runId: 1 }
+    case 'github_ci_annotations':
+      return { checkId: 1 }
     default:
       return {}
   }
@@ -74,6 +78,8 @@ function sampleFor(name) {
       return { base: 'main', head: 'feat', ahead: 1, behind: 0, stats: { files: 1, additions: 1, deletions: 1 } }
     case 'github_pr':
       return { pullRequests: [{ number: 1, title: 't', state: 'open', draft: false }] }
+    case 'github_pr_create':
+      return { repository: { owner: 'o', name: 'r' }, number: 2, title: 't', url: 'u', base: 'main', head: 'feat', draft: false }
     case 'github_ci':
       return { status: 'success', checks: [] }
     case 'github_issue':

@@ -2,22 +2,48 @@ import type {
   GitFile,
   CommitSummary,
   DiffFile,
+  Hunk,
   PullRequest,
   CheckRun,
 } from '../types.js'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 
+export interface WorkspaceCommentMeta {
+  id: string
+  author: string
+  body: string
+  path: string | null
+  line: number | null
+  resolved: boolean
+  createdAt: string | null
+  url: string | null
+}
+
 export interface WorkspaceMeta {
+  sampledAt?: string
   repository: { name: string; root: string; remote: string | null }
   branch: { name: string | null; upstream: string | null; ahead: number; behind: number }
   changes: { modified: number; staged: number; deleted: number; renamed: number; untracked: number }
   clean: boolean
+  files?: FileMeta[]
+  filesTruncated?: boolean
+  commits?: CommitMeta[]
+  commitsAhead?: number
+  branches?: Array<{ name: string; current: boolean; upstream: string | null; ahead: number; behind: number }>
+  stashCount?: number
+  additionsTotal?: number
+  deletionsTotal?: number
+  comparison?: { base: string | null; ahead: number; behind: number; files?: FileMeta[]; filesTruncated?: boolean } | null
   pullRequest: {
     number: number
     title: string
+    base: string
     state: string
     draft: boolean
+    merged?: boolean
     url: string
+    updatedAt?: string | null
+    comments?: WorkspaceCommentMeta[]
   } | null
   ci: { status: string; checks: CheckMeta[] } | null
 }
@@ -27,11 +53,25 @@ export interface StatusMeta {
   files: FileMeta[]
 }
 
+export interface HunkMeta {
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  lines: string[]
+}
+
+export type DiffOmittedReason = 'size' | 'binary'
+
 export interface FileMeta {
   path: string
   oldPath: string | null
   status: string
   staged: boolean
+  additions?: number
+  deletions?: number
+  hunks?: HunkMeta[]
+  diffOmitted?: DiffOmittedReason
 }
 
 export interface DiffFileMeta {
@@ -41,6 +81,8 @@ export interface DiffFileMeta {
   binary: boolean
   additions: number
   deletions: number
+  hunks?: HunkMeta[]
+  diffOmitted?: DiffOmittedReason | null
 }
 
 export interface DiffMeta {
@@ -48,7 +90,15 @@ export interface DiffMeta {
   files: DiffFileMeta[]
 }
 
+export interface CommitFileMeta {
+  path: string
+  status: string
+  additions: number
+  deletions: number
+}
+
 export interface CommitMeta {
+  sha: string
   shortSha: string
   message: string
   author: string
@@ -56,6 +106,7 @@ export interface CommitMeta {
   additions: number
   deletions: number
   fileCount: number
+  files: CommitFileMeta[]
 }
 
 export interface CheckMeta {
@@ -64,6 +115,8 @@ export interface CheckMeta {
   conclusion: string | null
   workflow: string | null
   url: string | null
+  startedAt: string | null
+  completedAt: string | null
 }
 
 export interface PrMeta {
@@ -74,6 +127,17 @@ export interface PrMeta {
     draft: boolean
     url: string
   }>
+}
+
+export interface PrCreateMeta {
+  created: {
+    number: number
+    title: string | null
+    url: string
+    base: string
+    head: string
+    draft: boolean
+  }
 }
 
 export interface ShowMeta {
@@ -103,28 +167,60 @@ export interface CiMeta {
   checks: CheckMeta[]
 }
 
+const MAX_META_HUNKS_PER_FILE = 30
+const MAX_META_HUNK_LINES = 400
+
+function hunksMeta(hunks: Hunk[] | undefined, binary: boolean): Pick<FileMeta, 'hunks' | 'diffOmitted'> {
+  if (binary) return { diffOmitted: 'binary' }
+  const list = Array.isArray(hunks) ? hunks : []
+  const bounded = list.slice(0, MAX_META_HUNKS_PER_FILE).map((h) => ({
+    oldStart: h.oldStart,
+    oldLines: h.oldLines,
+    newStart: h.newStart,
+    newLines: h.newLines,
+    lines: h.lines.slice(0, MAX_META_HUNK_LINES),
+  }))
+  if (bounded.length === 0) return {}
+  if (list.length > MAX_META_HUNKS_PER_FILE) return { hunks: bounded, diffOmitted: 'size' as const }
+  return { hunks: bounded }
+}
+
 function fileMeta(f: GitFile): FileMeta {
-  return {
+  const base: FileMeta = {
     path: f.path,
     oldPath: f.oldPath ?? null,
     status: f.status,
     staged: f.staged,
   }
+  const extra = f as { additions?: unknown; deletions?: unknown; hunks?: Hunk[]; diffOmitted?: DiffOmittedReason }
+  if (typeof extra.additions === 'number') {
+    return {
+      ...base,
+      additions: extra.additions,
+      deletions: extra.deletions as number,
+      ...(extra.hunks || extra.diffOmitted ? hunksMeta(extra.hunks, false) : {}),
+      ...(extra.diffOmitted ? { diffOmitted: extra.diffOmitted } : {}),
+    }
+  }
+  return base
 }
 
 function diffFileMeta(f: DiffFile): DiffFileMeta {
+  const binary = f.binary ?? false
   return {
     path: f.path,
     oldPath: f.oldPath,
     status: f.status,
-    binary: f.binary ?? false,
+    binary,
     additions: f.additions,
     deletions: f.deletions,
+    ...hunksMeta(f.hunks, binary),
   }
 }
 
 function commitMeta(c: CommitSummary): CommitMeta {
   return {
+    sha: c.sha,
     shortSha: c.shortSha,
     message: c.message,
     author: c.author,
@@ -132,6 +228,12 @@ function commitMeta(c: CommitSummary): CommitMeta {
     additions: c.files?.additions ?? 0,
     deletions: c.files?.deletions ?? 0,
     fileCount: c.files?.count ?? 0,
+    files: (c.files?.list ?? []).map((f) => ({
+      path: f.path,
+      status: f.status,
+      additions: f.additions,
+      deletions: f.deletions,
+    })),
   }
 }
 
@@ -142,6 +244,8 @@ function checkMeta(c: CheckRun): CheckMeta {
     conclusion: c.conclusion,
     workflow: c.workflow,
     url: c.url,
+    startedAt: c.startedAt,
+    completedAt: c.completedAt,
   }
 }
 
@@ -149,10 +253,34 @@ export function toWorkspaceMeta(w: {
   repository: { name: string; root: string; remote: string | null }
   branch: { name: string | null; upstream: string | null; ahead: number; behind: number }
   workspace: { clean: boolean; modified: number; staged: number; deleted: number; renamed: number; untracked: number }
-  pullRequest: { number: number; title: string; state: string; draft: boolean; url: string } | null
+  files?: Array<GitFile & { additions?: number; deletions?: number }>
+  filesTruncated?: boolean
+  diffs?: Array<GitFile & { additions?: number; deletions?: number }>
+  commits?: { ahead: number; recent: CommitSummary[] }
+  branches?: Array<{ name: string; current: boolean; upstream: string | null; ahead: number; behind: number }>
+  stashCount?: number
+  additionsTotal?: number
+  deletionsTotal?: number
+  comparison?: { base: string | null; ahead: number; behind: number; files?: FileMeta[]; filesTruncated?: boolean } | null
+  pullRequest: {
+    number: number
+    title: string
+    base: string
+    state: string
+    draft: boolean
+    merged?: boolean
+    url: string
+    updatedAt?: string | null
+    comments?: WorkspaceCommentMeta[]
+  } | null
   ci: { status: string; checks: CheckRun[] } | null
 }): WorkspaceMeta {
+  const diffIndex = new Map<string, GitFile & { additions?: number; deletions?: number }>()
+  if (Array.isArray(w.diffs)) {
+    for (const d of w.diffs) diffIndex.set(d.path, d)
+  }
   return {
+    sampledAt: new Date().toISOString(),
     repository: w.repository,
     branch: w.branch,
     changes: {
@@ -163,6 +291,24 @@ export function toWorkspaceMeta(w: {
       untracked: w.workspace.untracked,
     },
     clean: w.workspace.clean,
+    ...(w.files
+      ? {
+          files: w.files.map((f) => {
+            const meta = fileMeta(f)
+            const d = diffIndex.get(f.path) ?? (f.oldPath ? diffIndex.get(f.oldPath) : undefined)
+            if (!d || meta.hunks || meta.diffOmitted) return meta
+            const merged = fileMeta(d)
+            return merged.hunks || merged.diffOmitted ? { ...meta, ...merged, staged: meta.staged } : meta
+          }),
+          filesTruncated: w.filesTruncated === true,
+        }
+      : {}),
+    ...(w.commits ? { commits: w.commits.recent.map(commitMeta), commitsAhead: w.commits.ahead } : {}),
+    ...(w.branches && w.branches.length ? { branches: w.branches } : {}),
+    ...(typeof w.stashCount === 'number' && w.stashCount > 0 ? { stashCount: w.stashCount } : {}),
+    ...(typeof w.additionsTotal === 'number' ? { additionsTotal: w.additionsTotal } : {}),
+    ...(typeof w.deletionsTotal === 'number' ? { deletionsTotal: w.deletionsTotal } : {}),
+    ...(w.comparison ? { comparison: w.comparison } : {}),
     pullRequest: w.pullRequest,
     ci: w.ci ? { status: w.ci.status, checks: w.ci.checks.map(checkMeta) } : null,
   }
@@ -236,6 +382,26 @@ export function toPrMeta(p: { pullRequests: PullRequest[] }): PrMeta {
       draft: x.draft,
       url: x.url,
     })),
+  }
+}
+
+export function toPrCreateMeta(p: {
+  number: number
+  title: string | null
+  url: string
+  base: string
+  head: string
+  draft: boolean
+}): PrCreateMeta {
+  return {
+    created: {
+      number: p.number,
+      title: p.title,
+      url: p.url,
+      base: p.base,
+      head: p.head,
+      draft: p.draft,
+    },
   }
 }
 

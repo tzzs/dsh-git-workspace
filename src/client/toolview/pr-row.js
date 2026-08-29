@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Card, Row, Pill, Muted } from '../components.js'
-import { blockMeta, firstLine } from '../common.js'
+import { blockMeta } from '../common.js'
 
 export function PrRow({ block }) {
   const meta = blockMeta(block)
@@ -18,12 +18,12 @@ export function PrRow({ block }) {
     prs.map((pr) =>
       React.createElement(
         Row,
-        { key: pr.number },
-        React.createElement(Pill, { text: (pr.state || 'open').toUpperCase() }),
+        { key: pr.number, className: 'dgw-row' },
+        React.createElement(Pill, { text: (pr.state || 'open').toUpperCase() + (pr.draft ? ' · DRAFT' : '') }),
         React.createElement(
           'a',
-          { href: pr.url, target: '_blank', rel: 'noreferrer', style: { color: 'var(--dsw-alias-brand-primary)', textDecoration: 'none', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-          `#${pr.number} ${firstLine(pr.title)}`,
+          { href: pr.url, target: '_blank', rel: 'noreferrer', className: 'dgw-link', style: { color: 'var(--dsw-alias-brand-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+          `#${pr.number} ${(pr.title || '').split('\n')[0]}`,
         ),
       ),
     ),

@@ -89,8 +89,8 @@ function transformModule(src) {
 
   // export function name(...) {...}
   body = body.replace(
-    /export\s+function\s+(\w+)/g,
-    (_m, name) => `function ${name}`,
+    /export\s+(async\s+)?function\s+(\w+)/g,
+    (_m, isAsync, name) => `${isAsync || ''}function ${name}`,
   )
   // export const name = ...
   body = body.replace(/export\s+const\s+/g, 'const ')
@@ -99,7 +99,7 @@ function transformModule(src) {
 
   // collect exports: functions and consts declared at top level
   const exported = []
-  const fnRe = /^function\s+(\w+)/gm
+  const fnRe = /^(?:async\s+)?function\s+(\w+)/gm
   let m
   while ((m = fnRe.exec(body))) exported.push(m[1])
   const constRe = /^const\s+(\w+)/gm

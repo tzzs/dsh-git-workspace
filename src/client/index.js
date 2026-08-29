@@ -6,12 +6,10 @@ import { ShowRow } from './toolview/show-row.js'
 import { PrRow } from './toolview/pr-row.js'
 import { CiRow } from './toolview/ci-row.js'
 import { GenericRow } from './toolview/generic-row.js'
-import { GitWorkspaceHeaderAction } from './panel/container.js'
+import { GitWorkspaceControl } from './panel/container.js'
+import { bindHostContext } from './services.js'
+import { ensureStyles } from './components.js'
 
-// Only the slot registry is needed to register the UI. The tool cards and the
-// header action receive their data (block / useSession) from the framework
-// slot props, not from injected services — so a minimal inject avoids fiber
-// materialization failures when a named service is absent.
 export const inject = ['slots']
 
 const TOOLVIEW = [
@@ -21,6 +19,7 @@ const TOOLVIEW = [
   ['git_commits', CommitsRow],
   ['git_show', ShowRow],
   ['github_pr', PrRow],
+  ['github_pr_create', GenericRow],
   ['github_ci', CiRow],
   ['git_files', GenericRow],
   ['git_compare', GenericRow],
@@ -30,6 +29,14 @@ const TOOLVIEW = [
   ['git_worktrees', GenericRow],
   ['git_stash', GenericRow],
   ['git_tags', GenericRow],
+  ['git_stage', GenericRow],
+  ['git_unstage', GenericRow],
+  ['git_commit', GenericRow],
+  ['git_branch_create', GenericRow],
+  ['git_push', GenericRow],
+  ['git_checkout', GenericRow],
+  ['git_merge', GenericRow],
+  ['git_reset', GenericRow],
   ['github_pr_diff', GenericRow],
   ['github_pr_reviews', GenericRow],
   ['github_pr_comments', GenericRow],
@@ -37,10 +44,11 @@ const TOOLVIEW = [
   ['github_issue', GenericRow],
   ['github_issue_comments', GenericRow],
   ['github_releases', GenericRow],
+  ['github_pr_merge', GenericRow],
+  ['github_pr_comment', GenericRow],
+  ['github_pr_review', GenericRow],
 ]
 
-// Guard one registration so a single failing slot can never tear down the
-// rest of the plugin's contributions.
 function registerSlot(ctx, slot, def, component) {
   try {
     ctx.slots.inject(slot, () => ctx.slots.register(def, component))
@@ -52,6 +60,8 @@ function registerSlot(ctx, slot, def, component) {
 }
 
 export function apply(ctx) {
+  bindHostContext(ctx)
+  ensureStyles()
   for (const [name, component] of TOOLVIEW) {
     registerSlot(
       ctx,
@@ -62,8 +72,8 @@ export function apply(ctx) {
   }
   registerSlot(
     ctx,
-    'conversation.session.header.actions',
-    { name: 'conversation.session.header.actions', id: 'git-workspace', order: 10 },
-    GitWorkspaceHeaderAction,
+    'conversation.input.left',
+    { name: 'conversation.input.left', id: 'git-workspace', order: 10 },
+    GitWorkspaceControl,
   )
 }

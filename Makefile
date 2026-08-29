@@ -20,11 +20,22 @@ PKG_NAME ?= @tzzs/dsh-git-workspace
 # Fail loud instead of booting a profile that cannot see the plugin. The dsh
 # CLI defaults DSH_HOME to ~/.dsh when the variable is unset, so a profile
 # installed under a different home boots without the client bundle (no entry in
-# the boot manifest, no error, no UI).
+# the boot manifest, no error, no UI). DSH_HOME must also live on a real ext4
+# filesystem: dsh's credentials file needs chmod 600, impossible on NTFS-backed
+# WSL /mnt/* mounts.
+define check-dsh-home
+	@case "$(DSH_HOME)" in /mnt/*|/media/*) \
+		echo "ERROR: DSH_HOME='$(DSH_HOME)' is on a drvfs/NTFS mount (/mnt/*)." >&2; \
+		echo "  dsh enforces chmod 600 on its credentials file, which fails on NTFS-backed mounts." >&2; \
+		echo "  Use a native ext4 path instead, e.g.: make $(1) DSH_HOME=\$$HOME/.dsh-git-workspace" >&2; \
+		exit 1; ;; esac
+endef
 define check-profile-includes-plugin
 	@if ! $(DSH_ENV) $(DSH) --profile "$(1)" --dump-config 2>/dev/null | grep -q "$(PKG_NAME)"; then \
 		echo "ERROR: $(PKG_NAME) is not in profile '$(1)' (DSH_HOME=$(DSH_HOME))." >&2; \
-		echo "  The dsh CLI defaults DSH_HOME to ~/.dsh when unset; run 'dsh plugin --profile $(1) add' under the SAME DSH_HOME." >&2; \
+		echo "  The dsh CLI defaults DSH_HOME to ~/.dsh when unset; run 'dsh plugin --profile $(1) add' under the SAME DSH_HOME:" >&2; \
+		echo "    export DSH_HOME=$(DSH_HOME)" >&2; \
+		echo "    dsh plugin --profile $(1) add $(CURDIR)" >&2; \
 		exit 1; \
 	fi
 endef
@@ -72,27 +83,33 @@ $(PNPM_SHIM):
 	@chmod +x "$(PNPM_SHIM)"
 
 local-install: build $(PNPM_SHIM)
+	$(call check-dsh-home,local-install)
 	@mkdir -p "$(DSH_HOME)"
 	$(DSH_ENV) $(DSH) plugin --profile "$(DSH_PROFILE)" add "$(CURDIR)"
 
 local-config: local-install
+	$(call check-profile-includes-plugin,$(DSH_PROFILE))
 	$(DSH_ENV) $(DSH) --profile "$(DSH_PROFILE)" --dump-config
 
 local-run: local-install
+	$(call check-profile-includes-plugin,$(DSH_PROFILE))
 	$(DSH_ENV) $(DSH) --profile "$(DSH_PROFILE)"
 
 local-web: build $(PNPM_SHIM)
+	$(call check-dsh-home,local-web)
 	@mkdir -p "$(DSH_HOME)"
 	$(DSH_ENV) $(DSH) plugin --profile web add "$(CURDIR)"
 	$(call check-profile-includes-plugin,web)
-	$(DSH_ENV) $(DSH) --profile web --port 0
+	@echo ""
+	@$(DSH_ENV) $(DSH) --profile web --port 0
 
 local-pack: check
 	$(NPM) pack
 
 local-tarball-install: local-pack $(PNPM_SHIM)
+	$(call check-dsh-home,local-tarball-install)
 	@mkdir -p "$(DSH_HOME)"
-	@tarball=$$($(NPM) pack --silent | tail -n 1); \\
+	@tarball=$$($(NPM) pack --silent | tail -n 1); \
 	$(DSH_ENV) $(DSH) plugin --profile "$(DSH_PROFILE)" add "$(CURDIR)/$$tarball"
 
 clean:

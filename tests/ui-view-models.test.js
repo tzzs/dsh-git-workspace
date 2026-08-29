@@ -16,6 +16,7 @@ import {
   truncatePath,
   checkIcon,
 } from '../lib/ui/view-models.js'
+import { toWorkspaceMeta, toDiffMeta } from '../lib/ui/meta.js'
 
 test('toGitFileVm maps status to label and staged/unstaged', () => {
   const m = toGitFileVm({ path: 'a.ts', status: 'modified', staged: true })
@@ -159,4 +160,132 @@ test('truncatePath keeps the file name', () => {
   const p = truncatePath('src/github/comments/review.ts', 20)
   assert.ok(p.includes('review.ts'))
   assert.ok(p.length <= 20 || p.startsWith('…/'))
+})
+
+test('toWorkspaceMeta carries files, commits, branches, stash and comparison', () => {
+  const m = toWorkspaceMeta({
+    repository: { name: 'repo', root: '/r', remote: null },
+    branch: { name: 'b', upstream: null, ahead: 0, behind: 0 },
+    workspace: { clean: false, modified: 1, staged: 1, deleted: 0, renamed: 0, untracked: 1 },
+    files: [
+      { path: 'a.ts', oldPath: null, status: 'modified', staged: false },
+      { path: 's.ts', oldPath: null, status: 'added', staged: true },
+    ],
+    filesTruncated: false,
+    commits: {
+      ahead: 2,
+      recent: [{ sha: 'x', shortSha: 'x1', message: 'm', author: 'a', date: 'd', files: { count: 1, additions: 2, deletions: 3 } }],
+    },
+    branches: [{ name: 'b', current: true, upstream: null, ahead: 0, behind: 0 }],
+    stashCount: 1,
+    comparison: { base: 'main', ahead: 2, behind: 0 },
+    pullRequest: null,
+    ci: null,
+  })
+  assert.equal(m.files.length, 2)
+  assert.equal(m.files[1].staged, true)
+  assert.equal(m.commits.length, 1)
+  assert.equal(m.commits[0].additions, 2)
+  assert.deepEqual(m.branches, [{ name: 'b', current: true, upstream: null, ahead: 0, behind: 0 }])
+  assert.equal(m.stashCount, 1)
+  assert.deepEqual(m.comparison, { base: 'main', ahead: 2, behind: 0 })
+  assert.ok(typeof m.sampledAt === 'string' && !Number.isNaN(Date.parse(m.sampledAt)), 'stamps an ISO sampledAt')
+})
+
+test('toWorkspaceMeta passes the pull request base branch through', () => {
+  const m = toWorkspaceMeta({
+    repository: { name: 'repo', root: '/r', remote: null },
+    branch: { name: 'feature-x', upstream: 'origin/feature-x', ahead: 1, behind: 0 },
+    workspace: { clean: true, modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+    comparison: { base: 'develop', ahead: 3, behind: 0 },
+    pullRequest: { number: 9, title: 'PR', base: 'develop', state: 'OPEN', draft: false, url: 'u' },
+    ci: null,
+  })
+  assert.equal(m.pullRequest.base, 'develop')
+  assert.equal(m.comparison.base, 'develop')
+})
+
+test('toWorkspaceMeta carries CI check timing fields through', () => {
+  const m = toWorkspaceMeta({
+    repository: { name: 'repo', root: '/r', remote: null },
+    branch: { name: 'b', upstream: null, ahead: 0, behind: 0 },
+    workspace: { clean: true, modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+    pullRequest: null,
+    ci: {
+      status: 'success',
+      checks: [
+        {
+          name: 'test (24)',
+          status: 'completed',
+          conclusion: 'success',
+          workflow: 'CI',
+          url: 'https://github.com/o/r/actions/runs/1/job/2',
+          startedAt: '2026-08-28T18:02:33Z',
+          completedAt: '2026-08-28T18:02:47Z',
+        },
+      ],
+    },
+  })
+  assert.equal(m.ci.checks[0].startedAt, '2026-08-28T18:02:33Z')
+  assert.equal(m.ci.checks[0].completedAt, '2026-08-28T18:02:47Z')
+})
+
+test('toWorkspaceMeta omits optional sections when absent', () => {
+  const m = toWorkspaceMeta({
+    repository: { name: 'r', root: '/r', remote: null },
+    branch: { name: 'main', upstream: null, ahead: 0, behind: 0 },
+    workspace: { clean: true, modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+    pullRequest: null,
+    ci: null,
+  })
+  assert.equal(m.files, undefined)
+  assert.equal(m.commits, undefined)
+  assert.equal(m.branches, undefined)
+  assert.equal(m.stashCount, undefined)
+  assert.equal(m.comparison, undefined)
+})
+
+test('toWorkspaceMeta merges sampled diff hunks into matching files by path', () => {
+  const m = toWorkspaceMeta({
+    repository: { name: 'r', root: '/r', remote: null },
+    branch: { name: 'b', upstream: null, ahead: 0, behind: 0 },
+    workspace: { clean: false, modified: 2, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+    files: [
+      { path: 'a.ts', oldPath: null, status: 'modified', staged: false, additions: 1, deletions: 1 },
+      { path: 'plain.ts', oldPath: null, status: 'untracked', staged: false },
+    ],
+    diffs: [
+      {
+        path: 'a.ts',
+        oldPath: null,
+        status: 'modified',
+        staged: false,
+        additions: 1,
+        deletions: 1,
+        hunks: [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: ['-x', '+y'] }],
+      },
+    ],
+    pullRequest: null,
+    ci: null,
+  })
+  const a = m.files.find((f) => f.path === 'a.ts')
+  const plain = m.files.find((f) => f.path === 'plain.ts')
+  assert.equal(a.hunks.length, 1)
+  assert.deepEqual(a.hunks[0].lines, ['-x', '+y'])
+  assert.equal(a.staged, false, 'merge preserves the status-list metadata')
+  assert.equal(plain.hunks, undefined, 'files without sampled hunks stay untouched')
+})
+
+test('toDiffMeta carries bounded hunks and marks binary omission', () => {
+  const d = toDiffMeta({
+    files: [
+      { path: 'a.ts', oldPath: null, status: 'modified', additions: 1, deletions: 1, hunks: [{ oldStart: 3, oldLines: 2, newStart: 3, newLines: 2, lines: ['-a', '+b'] }] },
+      { path: 'img.png', oldPath: null, status: 'added', binary: true, additions: 0, deletions: 0, hunks: [] },
+    ],
+  })
+  const a = d.files.find((f) => f.path === 'a.ts')
+  const img = d.files.find((f) => f.path === 'img.png')
+  assert.deepEqual(a.hunks[0].lines, ['-a', '+b'])
+  assert.equal(img.binary, true)
+  assert.equal(img.diffOmitted, 'binary')
 })
