@@ -1,11 +1,13 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session } from '@deepseek-ai/dsh-session'
+import * as sessionRuntime from '@deepseek-ai/dsh-session'
 import { command } from './git/exec.js'
 import { gitWorkspace } from './tools/git-workspace.js'
 import { toWorkspaceMeta } from './ui/meta.js'
 import type { WorkspaceMeta } from './ui/meta.js'
 
 export const WORKSPACE_EVENT = 'tzzs.git-workspace/sample'
+export const WORKSPACE_RECORD = 'plugin:tzzs/git-workspace-sample'
 
 export const WORKSPACE_PROJECTION_KEY = 'tzzs.git-workspace'
 
@@ -49,7 +51,9 @@ const unit: ProjectionUnit = {
   stateSchema: { parse: parseSample },
   init: () => null,
   apply: (state, event) =>
-    event.type === WORKSPACE_EVENT && isWorkspaceSample(event.data) ? event.data : state,
+    (event.type === WORKSPACE_EVENT || event.type === WORKSPACE_RECORD) && isWorkspaceSample(event.data)
+      ? event.data
+      : state,
   view: (state) => state,
   wire: {
     viewSchema: { parse: parseSample },
@@ -112,7 +116,11 @@ async function runSample(session: Session, force = false): Promise<void> {
     const fingerprint = JSON.stringify(payload)
     if (!force && lastFingerprints.get(session) === fingerprint) return
     lastFingerprints.set(session, fingerprint)
-    session.append(WORKSPACE_EVENT, payload)
+    const appendRecord = (sessionRuntime as {
+      appendPluginRecord?: (session: Session, type: string, data: WorkspaceSample) => unknown
+    }).appendPluginRecord
+    if (typeof appendRecord === 'function') appendRecord(session, WORKSPACE_RECORD, payload)
+    else session.append(WORKSPACE_EVENT, payload)
   } catch {
     return
   }
