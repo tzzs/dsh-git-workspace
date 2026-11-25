@@ -52,19 +52,30 @@ window.__ModuleLoader__.load({
    space by animating its `margin-right`; on narrow viewports (<760px) it falls
    back to a floating overlay. `Ctrl/Cmd+Shift+G` toggles it from anywhere.
 
-   The drawer body has two tabs:
+   The drawer is one continuous flow, not a tabbed workspace:
 
-   - **Source Control** — overview card (branch, upstream, total `+adds/-dels`
-     from per-file numstat, CI dot, comparison vs base, stash count), a commit
-     box with a Git action menu, collapsible cards for Changes and Untracked
-     files (directory-tree grouping, per-file stats and status letters,
-     inline diff viewer, per-file Stage/Unstage buttons), and Recent commits.
+   - **Status bar** — current branch, upstream, ahead/behind, dirty/clean
+     state, and Fetch / Pull / Push actions. Every sync action dispatches its
+     native command and then refreshes the local sample.
+   - **Changes** — one tree grouped into Staged / Unstaged / Untracked, each
+     group collapsible and carrying its own bulk action. Directories compact
+     and collapse; every file row shows its status letter and per-side
+     `+adds/-dels`. Clicking a file opens its diff inline beneath the row,
+     with Unified/Split, per-hunk Stage / Unstage / Discard, and the
+     Fetch-full-diff fallback for omitted patches.
    - **Pull Request** — PR state pill + link, a Merge & review card (merge
      method choice, delete-branch checkbox, Approve / Request-changes buttons),
      CI status card (per-check rows), comments grouped into Unresolved /
-     Resolved sections, and a comment composer. Comments are aggregated by the
-     backend: `git_workspace` fetches the current branch's PR review threads
-     when a pull request exists.
+     Resolved sections, and a comment composer. With no PR, the same section
+     offers Create PR. Comments are aggregated by the backend:
+     `git_workspace` fetches the current branch's PR review threads when a
+     pull request exists.
+   - **Commit bar** — pinned to the bottom of the drawer: message box plus a
+     Commit button disabled until there is both a message and at least one
+     staged file. A successful commit clears the draft and refreshes the
+     sample; the overflow menu keeps the rest of the Git actions.
+   - **History** — "Committed on branch" and "Graph" stay available as
+     collapsed sections below the PR area.
 
 ## Component structure
 
@@ -161,6 +172,13 @@ State is intentionally lightweight:
 - The sidebar keeps only `open` + `width` (both persisted in localStorage);
   all workspace data is read from the session conversation snapshot via the
   framework's `useSession` hook.
+- The panel's own reading state is persisted under
+  `dsh-git-workspace.ui:<repo>:<branch>`: selected file/inline diff, diff
+  mode, tree/list choice, per-group and per-directory expansion, and the
+  commit-message draft. The container keys the panel by that scope, so a
+  branch change remounts into its own state while switching sessions or
+  reloading the browser restores the same repo/branch view. A draft is
+  cleared only after a successful commit dispatch.
 
 ## Real refresh
 
@@ -255,7 +273,7 @@ guard. There is no chat fallback: `session.prompt(...)` is never called from
 the panel. When native commands are unavailable, the panel disables itself
 (see "Real refresh" above) instead of degrading to a queued turn.
 
-Source Control tab:
+Changes flow:
 
 - **Per-row hover actions** (`stageDiscardActions`) — every file and folder
   row in the Changes tree reveals, on hover, one coherent action set instead
@@ -264,60 +282,67 @@ Source Control tab:
   Unstage icon; otherwise, Discard + Stage side by side. A folder's controls
   dispatch `git-stage` / `git-unstage` / `git-discard-paths` with every file
   under it in one call; a file's controls are scoped to just its own path.
-  Discard fires `git-discard-paths` immediately on click — no separate
-  confirm dialog, same convention as the "Discard Changes" menu item below.
-- **Stage All / Unstage All** — header buttons that dispatch `git-stage` /
-  `git-unstage` with `all:true`.
-- **Commit box** — a message textarea (Ctrl/Cmd+Enter submits) plus a primary
-  button: it reads `Commit` when a message is typed and falls back to
-  `Stage All` when empty.
-- **Git action menu** — an overflow menu next to the commit box with Commit,
-  Commit & Push, Commit & Sync (`git-stage` → `git-commit` → `git-push`
-  command chains), Push, Force Push (framed as force-with-lease semantics),
-  New Branch / Switch Branch / Merge Branch (each opens a small name input,
-  then dispatches `git-branch-create` / `git-checkout` / `git-merge`; Switch
-  and Merge Branch attach a `<datalist>` of known branches sourced from the
-  already-sampled `data.branches` — autocomplete only, still free text, and
-  New Branch gets no datalist since it names a branch that doesn't exist
-  yet), Create PR / Push before PR (`git-pr-create`; disabled with a note
-  while a pull request already exists), read-only sync entries (Pull,
-  Fast-forward, Sync, Rebase from upstream, Fetch, Publish), and Discard
-  Changes (`git-discard`, the hard-reset command with confirm:true built in).
+  Discard is a two-click confirm control (`ConfirmButton`): the first click
+  arms it, the second dispatches `git-discard-paths`.
+- **Grouped tree** — the Changes tree renders three collapsible groups in
+  order: Staged, Unstaged, Untracked. A partially staged file appears in both
+  the staged and unstaged groups, each entry carrying its own side's stats,
+  status, and hunks. Group headers carry a count and one bulk action
+  (`git-unstage all:true` for Staged, `git-stage all:true` for the other two);
+  the Changes header keeps Stage all / Unstage all, search, and the
+  Tree/List toggle. Group and directory expansion persist per repo/branch.
+- **Commit bar** — pinned to the bottom, with a message textarea
+  (Ctrl/Cmd+Enter submits) and a primary Commit button. The button stays
+  disabled until there is both a non-empty message and at least one staged
+  file; its label reads `Commit N staged`. A successful commit clears the
+  persisted draft and forces a `/git-refresh` sample. The overflow menu keeps
+  Commit, Commit & Push, Commit & Sync (`git-stage` → `git-commit` →
+  `git-push` command chains), Push, Force Push (framed as force-with-lease
+  semantics; two-click confirm), New Branch / Switch Branch / Merge Branch
+  (each opens a small name input, then dispatches `git-branch-create` /
+  `git-checkout` / `git-merge`; Switch and Merge Branch attach a `<datalist>`
+  of known branches sourced from the already-sampled `data.branches` —
+  autocomplete only, still free text, and New Branch gets no datalist since
+  it names a branch that doesn't exist yet), Create PR / Push before PR
+  (`git-pr-create`; disabled with a note while a pull request already
+  exists), read-only sync entries (Pull, Fast-forward, Sync, Rebase from
+  upstream, Fetch, Publish), and Discard Changes (`git-discard`, the
+  hard-reset command with confirm:true built in; two-click confirm).
 - **Changes tree** — directory chains that hold nothing but a single child
   directory collapse into one row (e.g. `src` → `client` → `panel` renders as
   `src/client/panel`), mirroring VS Code/GitLens folder compaction. File rows
   carry the same generic file glyph as every other row (the primitives
   package ships no per-extension icon set, so it's not type-specific, but its
   absence read as a bigger problem — files sitting unaligned with their
-  sibling folders — than its sameness) but no chevron: a chevron implies an
-  inline expand/collapse that files don't do. `StatusChip` conveys the git
-  status (modified/added/deleted/etc.) via its letter and color, and the
-  active row (the file whose diff is currently open) is highlighted instead
-  via `data-active`. Every tree in the Source
-  diff popup — clicking a file row with patch data (see `hasPatch`:
-  non-empty `hunks`, or a `diffOmitted` reason) opens it in a centered modal
-  instead of expanding the row in place. `gitStatus` (`src/git/status.ts`)
-  passes `--untracked-files=all` so a directory that's untracked in full is
-  listed by its individual files, honoring `.gitignore`, rather than
-  collapsed to one entry ending in `/` (e.g. `.claude/`) the way git's
-  default `normal` mode reports it — the panel renders real leaf rows for it
-  instead of one opaque folder-shaped row. `buildTree` still strips a
-  trailing `/` from a path before splitting it into segments as a defensive
-  fallback (any caller that skips the `all` flag, or a future git default
-  change, would otherwise leave a trailing empty segment that renders as a
-  nameless file row).
-- **Diff viewer** — the popup defaults to a single unified column, with a
-  Unified/Split toggle in its header (`DiffModeToggle`, `diff-viewer.js`).
+  sibling folders — than its sameness) but no chevron: clicking a row with
+  patch data (see `hasPatch`: non-empty `hunks`, or a `diffOmitted` reason)
+  opens its diff inline directly beneath the row and closes on a second
+  click or the viewer's close button. `StatusChip` conveys the git status
+  (modified/added/deleted/etc.) via its letter and color, and the active row
+  is highlighted via `data-active`. `gitStatus` (`src/git/status.ts`) passes
+  `--untracked-files=all` so a directory that's untracked in full is listed
+  by its individual files, honoring `.gitignore`, rather than collapsed to one
+  entry ending in `/` (e.g. `.claude/`) the way git's default `normal` mode
+  reports it — the panel renders real leaf rows for it instead of one opaque
+  folder-shaped row. `buildTree` still strips a trailing `/` from a path
+  before splitting it into segments as a defensive fallback (any caller that
+  skips the `all` flag, or a future git default change, would otherwise
+  leave a trailing empty segment that renders as a nameless file row).
+- **Diff viewer** — the inline card defaults to a single unified column, with
+  a Unified/Split toggle in its header (`DiffModeToggle`, `diff-viewer.js`).
   Split renders two side-by-side columns (`.dgw-diff-splitpane`); a hunk's
   lines are paired left/right via `pairHunkRows` — context lines mirror onto
   both sides, and a run of deletions zips against the run of additions that
   follows it (GitHub-style), with a blank filler row on whichever side runs
-  short.
+  short. Each hunk header carries its side's actions: Stage hunk / Discard
+  hunk (two-click confirm) for an unstaged entry, Unstage hunk for a staged
+  entry, nothing for untracked/renamed/copied files. They dispatch
+  `git_stage_hunk` / `git_unstage_hunk` / `git_discard_hunk` and refresh.
 - **Commit diff** — each row in the "Committed on branch" / "Graph" cards
   is clickable and expands to show author, date, and short SHA; every other
   row shows its author inline, right-aligned, without needing to expand. A
   small icon button on the row, revealed on hover, dispatches `/git-show
-  {sha}` for that commit.
+  {sha}` for that commit. Both sections default collapsed below the PR area.
 - **Graph selection and refs** — HEAD and merge commits render as hollow
   rings ("graph nodes"); expanding a row (the HEAD commit starts expanded)
   fills its ring solid so the selected commit reads as distinct from the
@@ -338,8 +363,11 @@ Source Control tab:
   ancestor — a header nested this deep can't reliably provide that
   positioning context itself.
 
-Pull Request tab:
+Pull Request section:
 
+- **Status bar** — branch, upstream, ahead/behind, dirty/clean dot, and
+  Fetch / Pull / Push buttons. Each dispatches its native command with a
+  following `/git-refresh`; Pull/Push disable without an upstream.
 - **Merge card** — a prominent, un-sectioned split button (mirroring GitHub's
   own PR page rather than a collapsible card): the left half merges with the
   selected method, dispatching `github_pr_merge` (`/git-pr-merge`) with
@@ -347,11 +375,11 @@ Pull Request tab:
   `deleteBranch:true`. The chevron half opens a menu to switch method (Squash
   and merge / Create a merge commit / Rebase and merge — picking one only
   re-labels the button, it doesn't merge) or, below a separator, **Close pull
-  request**, which dispatches `github_pr_close` (`/git-pr-close`). Both merges
-  and closes chain a `/git-refresh` afterward. Approve and Request changes
-  buttons underneath dispatch `github_pr_review` (`/git-pr-review`;
-  `REQUEST_CHANGES` requires a review body). All of it disables itself once
-  the PR is merged or closed.
+  request** (two-click confirm), which dispatches `github_pr_close`
+  (`/git-pr-close`). Both merges and closes chain a `/git-refresh`
+  afterward. Approve and Request changes buttons underneath dispatch
+  `github_pr_review` (`/git-pr-review`; `REQUEST_CHANGES` requires a review
+  body). All of it disables itself once the PR is merged or closed.
 - **Full diff** — an icon button next to the PR stat line dispatches
   `/git-pr-diff {number}`.
 - **Checks card** — each check row expands (chevron) to show Status /
@@ -392,6 +420,9 @@ Write commands (the mutation paths the panel exposes):
 | --- | --- | --- |
 | `git_stage` | `git-stage` | |
 | `git_unstage` | `git-unstage` | |
+| `git_stage_hunk` | `git-stage-hunk` | Inline diff's "Stage hunk" |
+| `git_unstage_hunk` | `git-unstage-hunk` | Inline diff's "Unstage hunk" |
+| `git_discard_hunk` | `git-discard-hunk` | Inline diff's "Discard hunk" (two-click confirm), `confirm:true` baked in |
 | `git_commit` | `git-commit` | |
 | `git_push` | `git-push` | |
 | `git_branch_create` | `git-branch-create` | |
@@ -419,7 +450,7 @@ a button, `toolCommand` already wraps the tool):
 | `git_files` | `git-files` | — (scope is a positional arg, wrapped: `gitFiles(input.scope ?? 'working-tree', dir)`) |
 | `git_diff` | `git-diff` | Diff viewer's "Fetch full diff" CTA for binary/oversized files |
 | `git_commits` | `git-commits` | — (the panel renders commit history from the sampled meta) |
-| `git_show` | `git-show` | Each commit row's "View this commit's diff" icon button (SC tab) |
+| `git_show` | `git-show` | Each commit row's "View this commit's diff" icon button |
 | `git_compare` | `git-compare` | — |
 | `git_blame` | `git-blame` | — |
 | `git_branches` | `git-branches` | Feeds the Switch/Merge Branch input's `<datalist>` from the already-sampled `data.branches` (no extra round trip) |

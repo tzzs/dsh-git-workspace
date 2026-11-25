@@ -196,7 +196,7 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
       ),
       React.createElement(
         'div',
-        { style: { flex: '1 1 auto', overflowY: 'auto', overscrollBehavior: 'contain' } },
+        { style: { flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' } },
         children,
       ),
   )

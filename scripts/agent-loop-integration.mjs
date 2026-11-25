@@ -55,7 +55,9 @@ const names = [
   'github_ci','github_ci_logs','github_issue','github_issue_comments',
   'github_releases','git_stage','git_unstage','git_commit',
   'git_branch_create','git_push','git_checkout','git_merge','git_reset',
-  'github_pr_create','github_pr_merge','github_pr_comment','github_pr_review',
+  'git_discard_paths','git_stage_hunk','git_unstage_hunk','git_discard_hunk',
+  'github_pr_create','github_pr_merge','github_pr_close',
+  'github_pr_comment','github_pr_review','github_ci_annotations',
 ];
 const argsFor = (n) => {
   switch (n) {

@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Button, IconCloseFill14 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { Code, Muted, IconBtn, ensureStyles } from '../components.js'
+import { Code, Muted, IconBtn, ConfirmButton, ensureStyles } from '../components.js'
 
 const STATUS_LETTER = {
   modified: { text: 'M', color: 'var(--dsw-alias-state-warn-primary)' },
@@ -62,7 +62,7 @@ function DiffLine({ line }) {
   )
 }
 
-function DiffHunksUnified({ hunks }) {
+function DiffHunksUnified({ hunks, file, onHunkAction }) {
   let rendered = 0
   const blocks = []
   for (const hunk of hunks) {
@@ -71,7 +71,12 @@ function DiffHunksUnified({ hunks }) {
       React.createElement(
         'div',
         { key: `${hunk.oldStart}:${hunk.newStart}`, className: 'dgw-diff-hunk' },
-        React.createElement('div', { className: 'dgw-diff-hunkhead' }, `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`),
+        React.createElement(
+          'div',
+          { className: 'dgw-diff-hunkhead' },
+          React.createElement('span', null, `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`),
+          React.createElement(HunkActions, { file, hunk, onHunkAction }),
+        ),
         lines.map((l, i) => {
           rendered++
           return rendered <= MAX_RENDERED_LINES ? React.createElement(DiffLine, { key: i, line: l }) : null
@@ -144,7 +149,7 @@ function SplitDiffLine({ line, side }) {
   )
 }
 
-function DiffHunksSplit({ hunks }) {
+function DiffHunksSplit({ hunks, file, onHunkAction }) {
   let renderedRows = 0
   const blocks = []
   for (const hunk of hunks) {
@@ -155,7 +160,12 @@ function DiffHunksSplit({ hunks }) {
       React.createElement(
         'div',
         { key: `${hunk.oldStart}:${hunk.newStart}`, className: 'dgw-diff-hunk' },
-        React.createElement('div', { className: 'dgw-diff-hunkhead' }, `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`),
+        React.createElement(
+          'div',
+          { className: 'dgw-diff-hunkhead' },
+          React.createElement('span', null, `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`),
+          React.createElement(HunkActions, { file, hunk, onHunkAction }),
+        ),
         React.createElement(
           'div',
           { className: 'dgw-diff-splitpane' },
@@ -229,9 +239,67 @@ function DiffModeToggle({ mode, onChange }) {
   return React.createElement('span', { style: { display: 'inline-flex', gap: '2px', flex: 'none' } }, btn('unified', 'Unified'), btn('split', 'Split'))
 }
 
-export function DiffViewer({ file, onClose, onAskFull }) {
+function hunkTarget(hunk) {
+  return {
+    oldStart: hunk.oldStart,
+    oldLines: hunk.oldLines,
+    newStart: hunk.newStart,
+    newLines: hunk.newLines,
+  }
+}
+
+function HunkActions({ file, hunk, onHunkAction }) {
+  if (typeof onHunkAction !== 'function' || !file) return null
+  if (file.status === 'untracked' || file.status === 'renamed' || file.status === 'copied') return null
+  const target = hunkTarget(hunk)
+  const staged = file.staged === true
+  const button = (label, title, action) =>
+    React.createElement(
+      'button',
+      {
+        type: 'button',
+        className: 'dgw-hunkbtn',
+        title,
+        onClick: (e) => {
+          if (e) e.stopPropagation()
+          onHunkAction(file, action, target)
+        },
+      },
+      label,
+    )
+  if (staged) {
+    return React.createElement(
+      'span',
+      { className: 'dgw-hunkactions' },
+      button('Unstage hunk', 'Unstage this hunk', 'unstage'),
+    )
+  }
+  return React.createElement(
+    'span',
+    { className: 'dgw-hunkactions' },
+    button('Stage hunk', 'Stage this hunk', 'stage'),
+    React.createElement(ConfirmButton, {
+      className: 'dgw-hunkbtn',
+      label: 'Discard hunk',
+      confirmLabel: 'Confirm discard',
+      onConfirm: () => onHunkAction(file, 'discard', target),
+    }),
+  )
+}
+
+export function DiffViewer({
+  file,
+  onClose,
+  onAskFull,
+  mode: controlledMode,
+  onModeChange,
+  onHunkAction,
+  inline = false,
+}) {
   ensureStyles()
-  const [mode, setMode] = React.useState('unified')
+  const [innerMode, setInnerMode] = React.useState('unified')
+  const mode = controlledMode || innerMode
+  const setMode = onModeChange || setInnerMode
   const c = STATUS_LETTER[file.status] || STATUS_LETTER.modified
   const binary = file.diffOmitted === 'binary'
   const oversize = file.diffOmitted === 'size'
@@ -240,7 +308,7 @@ export function DiffViewer({ file, onClose, onAskFull }) {
   return React.createElement(
     'div',
     {
-      className: 'dgw-diff',
+      className: inline ? 'dgw-diff dgw-diff-inline' : 'dgw-diff',
       'data-git-workspace-diff': '',
       role: 'region',
       'aria-label': `Diff of ${file.path}`,
@@ -287,7 +355,9 @@ export function DiffViewer({ file, onClose, onAskFull }) {
           : React.createElement(
               'div',
               { className: 'dgw-diff-body' },
-              mode === 'split' ? React.createElement(DiffHunksSplit, { hunks }) : React.createElement(DiffHunksUnified, { hunks }),
+              mode === 'split'
+                ? React.createElement(DiffHunksSplit, { hunks, file, onHunkAction })
+                : React.createElement(DiffHunksUnified, { hunks, file, onHunkAction }),
             ),
   )
 }

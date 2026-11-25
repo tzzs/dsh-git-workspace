@@ -10,6 +10,7 @@ import {
   IconRefreshOutline14,
   IconRightUpOutline16,
   IconWarningOutline16,
+  Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   Row,
@@ -21,11 +22,12 @@ import {
   Dot,
   IconBtn,
   Section,
-  Modal,
   DropdownMenu,
+  ConfirmButton,
   checkDotState,
 } from '../components.js'
 import { DiffViewer } from './diff-viewer.js'
+import { usePanelUi } from './ui-state.js'
 
 const REFRESH_HINT = 'No workspace session available yet.'
 
@@ -166,7 +168,7 @@ function FileStats({ additions, deletions }) {
 }
 
 function buildTree(files) {
-  const root = { dirs: new Map(), files: [] }
+  const root = { path: '', dirs: new Map(), files: [] }
   for (const f of files) {
     // `git status` reports a directory that's untracked *in full* as one
     // entry ending in "/" (e.g. ".claude/") rather than listing its
@@ -179,7 +181,14 @@ function buildTree(files) {
     let node = root
     for (let i = 0; i < segs.length - 1; i++) {
       const seg = segs[i]
-      if (!node.dirs.has(seg)) node.dirs.set(seg, { name: seg, dirs: new Map(), files: [] })
+      if (!node.dirs.has(seg)) {
+        node.dirs.set(seg, {
+          name: seg,
+          path: segs.slice(0, i + 1).join('/'),
+          dirs: new Map(),
+          files: [],
+        })
+      }
       node = node.dirs.get(seg)
     }
     node.files.push({ ...f, name: segs[segs.length - 1] })
@@ -207,14 +216,14 @@ function compactDir(dir) {
   while (dir.files.length === 0 && dir.dirs.size === 1) {
     const child = dir.dirs.values().next().value
     dir.name = `${dir.name}/${child.name}`
+    dir.path = child.path
     dir.dirs = child.dirs
     dir.files = child.files
   }
   for (const child of dir.dirs.values()) compactDir(child)
 }
 
-function DirNode({ dir, depth, onDispatch, onOpenDiff, activePath }) {
-  const [open, setOpen] = React.useState(true)
+function DirNode({ dir, depth, open, onToggle, treeProps }) {
   return React.createElement(
     React.Fragment,
     null,
@@ -228,11 +237,11 @@ function DirNode({ dir, depth, onDispatch, onOpenDiff, activePath }) {
         role: 'button',
         tabIndex: 0,
         className: 'dgw-row dgw-dirbtn',
-        onClick: () => setOpen((v) => !v),
+        onClick: onToggle,
         onKeyDown: (e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
-            setOpen((v) => !v)
+            onToggle()
           }
         },
         'aria-expanded': open,
@@ -250,19 +259,14 @@ function DirNode({ dir, depth, onDispatch, onOpenDiff, activePath }) {
       ),
       React.createElement(
         'span',
-        // `flex: '0 1 auto'`, not `1 1 auto` — the name hugs its own text
-        // (shrinking with an ellipsis only if the row is genuinely too
-        // narrow) instead of stretching to fill the row, which pushed the
-        // count all the way to the far right edge instead of sitting next
-        // to the name like the reference design.
         { style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' } },
         dir.name,
       ),
       React.createElement(Muted, null, String(treeSize(dir))),
       React.createElement('span', { style: { flex: '1 1 auto' } }),
-      onDispatch ? stageDiscardActions(collectDirFiles(dir), onDispatch, DIR_STAGE_LABELS) : null,
+      treeProps.onDispatch ? stageDiscardActions(collectDirFiles(dir), treeProps.onDispatch, DIR_STAGE_LABELS) : null,
     ),
-    open ? React.createElement(TreeNodeRows, { node: dir, depth: depth + 1, onDispatch, onOpenDiff, activePath }) : null,
+    open ? React.createElement(TreeNodeRows, { node: dir, depth: depth + 1, treeProps }) : null,
   )
 }
 
@@ -276,8 +280,9 @@ function filterFiles(files, search) {
 // tree — pass `onDispatch: null` for the latter to hide stage controls.
 // `onOpenDiff(file, onDispatch)` opens the shared diff modal (see ScTab);
 // `activePath` is the path currently shown there, used to highlight the row.
-function FileTree({ files, onDispatch, viewMode = 'tree', onOpenDiff, activePath }) {
+function FileTree({ files, group = 'changes', onDispatch, viewMode = 'tree', selectedKey, onSelect, dirOpen, onToggleDir, diffMode, onDiffMode, onHunkAction, onCloseDiff }) {
   if (files.length === 0) return null
+  const treeProps = { group, onDispatch, selectedKey, onSelect, dirOpen, onToggleDir, diffMode, onDiffMode, onHunkAction, onCloseDiff }
   if (viewMode === 'list') {
     const sorted = [...files].sort((a, b) => a.path.localeCompare(b.path))
     return React.createElement(
@@ -285,19 +290,17 @@ function FileTree({ files, onDispatch, viewMode = 'tree', onOpenDiff, activePath
       { style: { display: 'flex', flexDirection: 'column' } },
       sorted.map((f) =>
         React.createElement(FileTreeRow, {
-          key: f.path + (f.staged ? ':staged' : ''),
+          key: fileKey(group, f),
           file: { ...f, name: f.path },
           depth: 0,
-          onDispatch,
-          onOpenDiff,
-          activePath,
+          treeProps,
         }),
       ),
     )
   }
   const tree = buildTree(files)
   for (const child of tree.dirs.values()) compactDir(child)
-  return React.createElement(TreeNodeRows, { node: tree, depth: 0, onDispatch, onOpenDiff, activePath })
+  return React.createElement(TreeNodeRows, { node: tree, depth: 0, treeProps })
 }
 
 function ViewModeToggle({ mode, onChange }) {
@@ -426,15 +429,26 @@ function GraphViewMenu({ mode, onChange, onRefresh, refreshing }) {
   )
 }
 
-function TreeNodeRows({ node, depth, onDispatch, onOpenDiff, activePath }) {
+function TreeNodeRows({ node, depth, treeProps }) {
   const rows = []
   const dirs = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
   for (const dir of dirs) {
-    rows.push(React.createElement(DirNode, { key: 'd/' + dir.name, dir, depth, onDispatch, onOpenDiff, activePath }))
+    const key = `${treeProps.group}:${dir.path}`
+    const open = !treeProps.dirOpen || treeProps.dirOpen[key] !== false
+    rows.push(
+      React.createElement(DirNode, {
+        key: 'd/' + dir.path,
+        dir,
+        depth,
+        open,
+        onToggle: () => treeProps.onToggleDir && treeProps.onToggleDir(key, !open),
+        treeProps,
+      }),
+    )
   }
   for (const f of files) {
-    rows.push(React.createElement(FileTreeRow, { key: f.path + f.staged, file: f, depth, onDispatch, onOpenDiff, activePath }))
+    rows.push(React.createElement(FileTreeRow, { key: fileKey(treeProps.group, f), file: f, depth, treeProps }))
   }
   return rows
 }
@@ -447,6 +461,17 @@ function hasPatch(file) {
   )
 }
 
+const refreshAction = () => ({ name: 'git-refresh', args: {} })
+
+function fileSide(group, file) {
+  if (group === 'untracked' || file.status === 'untracked') return 'untracked'
+  return file.staged ? 'staged' : 'unstaged'
+}
+
+function fileKey(group, file) {
+  return `${group}:${fileSide(group, file)}:${file.path}`
+}
+
 function hoverActionBtn(label, onClick, Icon) {
   return React.createElement(
     'span',
@@ -455,27 +480,56 @@ function hoverActionBtn(label, onClick, Icon) {
   )
 }
 
-// The hover action set for a file or folder row (VS Code's SCM row actions,
-// not a copy-path shortcut this row doesn't otherwise need): every path
-// already staged shows a single Unstage control; otherwise (any
-// unstaged/mixed — a folder mixing staged and unstaged files counts as "not
-// yet fully staged") shows Discard + Stage side by side. `files` is the
-// single file itself, or every file under a folder (`collectDirFiles`).
-// Discard dispatches `git-discard-paths` immediately, no client-side confirm
-// dialog — matching the existing "Discard Changes" menu item (`git-discard`),
-// where the deliberate hover + click on a destructive-looking icon *is* the
-// confirmation step.
+function hoverConfirmBtn(label, confirmLabel, onConfirm, Icon) {
+  return React.createElement(
+    'span',
+    { className: 'dgw-copy', onClick: (e) => e.stopPropagation(), style: { display: 'inline-flex', flex: 'none' } },
+    React.createElement(
+      Tooltip,
+      { label, side: 'bottom', delayMs: 250 },
+      React.createElement(
+        ConfirmButton,
+        {
+          className: 'dgw-iconbtn',
+          label,
+          confirmLabel,
+          onConfirm,
+          confirmChildren: React.createElement(
+            'span',
+            { style: { fontSize: '11px', fontWeight: 700, color: 'var(--dsw-alias-state-error-primary)' } },
+            '!',
+          ),
+        },
+        React.createElement(Icon, { size: 13 }),
+      ),
+    ),
+  )
+}
+
 function stageDiscardActions(files, onDispatch, labels) {
   if (!onDispatch || files.length === 0) return null
   const paths = files.map((f) => f.path)
   if (files.every((f) => f.staged === true)) {
-    return hoverActionBtn(labels.unstage, () => onDispatch({ name: 'git-unstage', args: { paths } }), IconCheckOutline14)
+    return hoverActionBtn(
+      labels.unstage,
+      () => onDispatch({ name: 'git-unstage', args: { paths }, next: refreshAction() }),
+      IconCheckOutline14,
+    )
   }
   return React.createElement(
     React.Fragment,
     null,
-    hoverActionBtn(labels.discard, () => onDispatch({ name: 'git-discard-paths', args: { paths } }), IconRefreshOutline14),
-    hoverActionBtn(labels.stage, () => onDispatch({ name: 'git-stage', args: { paths } }), IconPlusOutline16),
+    hoverConfirmBtn(
+      labels.discard,
+      `Confirm ${labels.discard.toLowerCase()}`,
+      () => onDispatch({ name: 'git-discard-paths', args: { paths }, next: refreshAction() }),
+      IconRefreshOutline14,
+    ),
+    hoverActionBtn(
+      labels.stage,
+      () => onDispatch({ name: 'git-stage', args: { paths }, next: refreshAction() }),
+      IconPlusOutline16,
+    ),
   )
 }
 
@@ -486,16 +540,16 @@ function fileIconColor(status) {
   return (STATUS_LETTER[status] && STATUS_LETTER[status].color) || 'var(--dsw-alias-label-caption)'
 }
 
-// File rows have no chevron (unlike DirNode) — they don't expand in place, a
-// standalone diff popup opens instead — but they do get the same generic
-// file icon a folder gets, so DIR_ICON_INSET is just DirNode's own
-// chevron(12) + gap(5): enough padding for a file's icon to land under a
-// sibling folder's icon at the same tree depth, instead of under its
-// chevron.
+// File rows have no chevron: clicking a patch-backed row opens its diff
+// inline under the row instead of expanding a folder. DIR_ICON_INSET is
+// DirNode's own chevron(12) + gap(5), so a file's icon lands under a sibling
+// folder's icon at the same tree depth.
 const DIR_ICON_INSET = 17
-function FileTreeRow({ file, depth, onDispatch, onOpenDiff, activePath }) {
-  const clickable = hasPatch(file) && typeof onOpenDiff === 'function'
-  const isActive = clickable && activePath === file.path
+function FileTreeRow({ file, depth, treeProps }) {
+  const { group, onDispatch, selectedKey, onSelect, diffMode, onDiffMode, onHunkAction, onCloseDiff } = treeProps
+  const key = fileKey(group, file)
+  const clickable = hasPatch(file) && typeof onSelect === 'function'
+  const isActive = clickable && selectedKey === key
   const rowStyle = { padding: `1px 6px 1px ${depth * 12 + 2 + DIR_ICON_INSET}px`, gap: '5px', lineHeight: '15px' }
   const rowChildren = [
     React.createElement(
@@ -508,29 +562,50 @@ function FileTreeRow({ file, depth, onDispatch, onOpenDiff, activePath }) {
     React.createElement(StatusChip, { key: 'status', status: file.status }),
     React.createElement('span', { key: 'stage-actions' }, stageDiscardActions([file], onDispatch, FILE_STAGE_LABELS)),
   ]
+  let row
   if (!clickable) {
-    return React.createElement(Row, { className: 'dgw-row', style: rowStyle }, ...rowChildren)
-  }
-  const open = () => onOpenDiff(file, onDispatch)
-  return React.createElement(
-    'div',
-    {
-      className: 'dgw-row dgw-filebtn',
-      role: 'button',
-      tabIndex: 0,
-      title: 'View diff',
-      onClick: open,
-      onKeyDown: (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          open()
-        }
+    row = React.createElement(Row, { className: 'dgw-row', style: rowStyle }, ...rowChildren)
+  } else {
+    const open = () => onSelect(key)
+    row = React.createElement(
+      'div',
+      {
+        className: 'dgw-row dgw-filebtn',
+        role: 'button',
+        tabIndex: 0,
+        title: 'View diff',
+        onClick: open,
+        onKeyDown: (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            open()
+          }
+        },
+        'aria-pressed': isActive,
+        'data-active': String(isActive),
+        style: rowStyle,
       },
-      'aria-pressed': isActive,
-      'data-active': String(isActive),
-      style: rowStyle,
-    },
-    ...rowChildren,
+      ...rowChildren,
+    )
+  }
+  if (!isActive) return row
+  return React.createElement(
+    React.Fragment,
+    null,
+    row,
+    React.createElement(
+      'div',
+      { className: 'dgw-inline-diff' },
+      React.createElement(DiffViewer, {
+        file,
+        inline: true,
+        mode: diffMode,
+        onModeChange: onDiffMode,
+        onHunkAction,
+        onAskFull: onDispatch ? () => onDispatch({ name: 'git-diff', args: { path: file.path } }) : null,
+        onClose: onCloseDiff || (() => onSelect(null)),
+      }),
+    ),
   )
 }
 
@@ -684,6 +759,7 @@ function actionCommand(action, message, data, branch) {
       return {
         name: 'git-pr-create',
         args: {base, ...(head ? {head} : {}), title, body},
+        next: {name: 'git-refresh', args: {}},
       }
     case 'push-before-pr': return {name: 'git-push', args: {}}
     case 'pull': return {name: 'git-pull', args: {}}
@@ -710,21 +786,126 @@ const GIT_ACTIONS = [
 
 const BRANCH_ACTION_VERBS = { 'new-branch': 'Create', 'switch-branch': 'Switch', 'merge-branch': 'Merge' }
 
-function CommitBox({ onDispatch, data }) {
-  const [msg, setMsg] = React.useState('')
+function stagedCount(data) {
+  const files = Array.isArray(data.files) ? data.files : []
+  if (files.length > 0) return files.filter((f) => f.staged === true && f.status !== 'untracked').length
+  return (data.changes && data.changes.staged) || 0
+}
+
+function StatusBar({ data, onDispatch, refreshing }) {
+  const branch = data.branch || {}
+  const dirty = countDirty(data)
+  const [busy, setBusy] = React.useState(null)
+  const sync = (name) => {
+    if (!onDispatch || busy) return
+    setBusy(name)
+    Promise.resolve(onDispatch({ name, args: {}, next: refreshAction() })).finally(() => setBusy(null))
+  }
+  const syncBtn = (name, label, title, disabled) =>
+    React.createElement(
+      'button',
+      {
+        type: 'button',
+        className: 'dgw-stagebtn dgw-syncbtn',
+        disabled: disabled || busy !== null,
+        title,
+        onClick: () => sync(name),
+      },
+      busy === name ? '…' : label,
+    )
+  return React.createElement(
+    'div',
+    { className: 'dgw-statusbar', style: { flexDirection: 'column', alignItems: 'stretch', gap: '3px' } },
+    React.createElement(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 } },
+      React.createElement(
+        'span',
+        { style: { display: 'inline-flex', color: 'var(--dsw-alias-label-caption)', flex: 'none' } },
+        React.createElement(IconBranchOutline16, { size: 13 }),
+      ),
+      React.createElement(
+        Code,
+        { style: { fontSize: '12.5px', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+        branch.name || 'detached',
+      ),
+      branch.upstream
+        ? React.createElement(
+            'span',
+            { title: branch.upstream, style: { display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10.5px', color: 'var(--dsw-alias-label-caption)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            React.createElement(ArrowIcon, { size: 9 }),
+            branch.upstream,
+          )
+        : null,
+      branch.ahead > 0
+        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '10.5px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `↑${branch.ahead}`)
+        : null,
+      branch.behind > 0
+        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '10.5px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `↓${branch.behind}`)
+        : null,
+      React.createElement('span', { style: { flex: '1 1 auto' } }),
+      onDispatch
+        ? React.createElement(
+            'span',
+            { style: { display: 'inline-flex', gap: '4px', flex: 'none' } },
+            syncBtn('git-fetch', 'Fetch', 'Fetch from remote', false),
+            syncBtn('git-pull', 'Pull', 'Pull (fast-forward only)', !branch.upstream),
+            syncBtn('git-push', 'Push', 'Push to remote', !branch.upstream),
+          )
+        : null,
+    ),
+    React.createElement(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 } },
+      React.createElement(Dot, { state: data.clean ? 'done' : 'warning', size: 7 }),
+      React.createElement(
+        'span',
+        { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' } },
+        data.clean ? 'Clean' : `${dirty} change${dirty === 1 ? '' : 's'}`,
+      ),
+      refreshing
+        ? React.createElement(React.Fragment, null, React.createElement(Dot, { state: 'ongoing', size: 7 }), React.createElement(Muted, null, 'refreshing…'))
+        : null,
+      React.createElement('span', { style: { flex: '1 1 auto' } }),
+      data.repository && repoWebUrl(data.repository.remote)
+        ? React.createElement(
+            'a',
+            { href: repoWebUrl(data.repository.remote), target: '_blank', rel: 'noreferrer', className: 'dgw-linkicon', title: 'Open repository on GitHub', 'aria-label': 'Open repository on GitHub' },
+            React.createElement(IconRightUpOutline16, { size: 12 }),
+          )
+        : null,
+    ),
+  )
+}
+
+function CommitBar({ data, onDispatch, onRefresh, ui, setUi }) {
+  const msg = ui.commitDraft || ''
+  const setMsg = (value) => setUi({ commitDraft: value })
   const [busy, setBusy] = React.useState(false)
   const [menu, setMenu] = React.useState(false)
   const [branchAction, setBranchAction] = React.useState(null)
   const [branchName, setBranchName] = React.useState('')
+  const staged = stagedCount(data)
+  const canCommit = Boolean(onDispatch) && staged > 0 && Boolean(msg.trim()) && !busy
+  const after = (action, ok) => {
+    if (!ok) return
+    if (action === 'commit' || action === 'commit-push' || action === 'commit-sync') setMsg('')
+    if (action !== 'create-pr' && onRefresh) onRefresh()
+  }
+  const commit = () => {
+    if (!canCommit) return
+    setBusy(true)
+    Promise.resolve(onDispatch({ name: 'git-commit', args: { message: msg.trim() } }))
+      .then((ok) => after('commit', ok))
+      .finally(() => setBusy(false))
+  }
   const run = (action, extra) => {
     if (busy || !onDispatch) return
-    const message = msg.trim()
     setBusy(true)
     setMenu(false)
-    Promise.resolve(onDispatch(actionCommand(action, message, data, extra))).finally(() => {
-      setBusy(false)
-      if (action === 'commit' || action === 'commit-push' || action === 'commit-sync') setMsg('')
-    })
+    Promise.resolve(onDispatch(actionCommand(action, msg.trim(), data, extra)))
+      .then((ok) => after(action, ok))
+      .finally(() => setBusy(false))
   }
   const startBranchAction = (id) => {
     setMenu(false)
@@ -738,9 +919,36 @@ function CommitBox({ onDispatch, data }) {
     setBranchAction(null)
     run(action, name)
   }
+  const menuItem = (id, label, i) =>
+    React.createElement(
+      React.Fragment,
+      { key: id },
+      i === 3 || i === 7 || i === 10 || i === 18 ? React.createElement('div', { className: 'dgw-actionsep' }) : null,
+      id === 'force-push' || id === 'discard'
+        ? React.createElement(ConfirmButton, {
+            className: 'dgw-action',
+            label,
+            confirmLabel: `Confirm ${label.toLowerCase()}`,
+            style: { color: 'var(--dsw-alias-state-error-primary)', textAlign: 'left' },
+            onConfirm: () => run(id),
+          })
+        : React.createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'dgw-action',
+              onClick: () => (BRANCH_ACTION_VERBS[id] ? startBranchAction(id) : run(id)),
+              disabled: (id === 'create-pr' || id === 'push-before-pr') && Boolean(data.pullRequest),
+            },
+            label,
+          ),
+      (id === 'create-pr' || id === 'push-before-pr') && data.pullRequest
+        ? React.createElement('div', { style: { padding: '0 12px 5px', fontSize: '11px', color: 'var(--dsw-alias-label-caption)' } }, 'A pull request already exists')
+        : null,
+    )
   return React.createElement(
     'div',
-    { style: { padding: '0 2px 10px', display: 'flex', flexDirection: 'column', gap: '6px', flex: 'none' } },
+    { className: 'dgw-commitbar' },
     React.createElement('textarea', {
       className: 'dgw-textarea',
       placeholder: 'Message',
@@ -751,16 +959,45 @@ function CommitBox({ onDispatch, data }) {
       onKeyDown: (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
           e.preventDefault()
-           run('commit')
+          commit()
         }
       },
     }),
     React.createElement(
       'div',
       { style: { position: 'relative', display: 'flex', flex: 'none' } },
-      React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: busy, onClick: () => run(msg.trim() ? 'commit' : 'stage-all'), title: 'Run Git operation', style: { borderRadius: '8px 0 0 8px' } }, React.createElement(IconPlusOutline16, { size: 14 }), busy ? 'Working…' : msg.trim() ? 'Commit' : 'Stage All'),
-      React.createElement('button', { type: 'button', className: 'dgw-stagebtn', 'aria-label': 'More Git operations', onClick: () => setMenu((v) => !v), style: { width: '38px', borderLeft: '1px solid var(--dsw-alias-border-l1)', borderRadius: '0 8px 8px 0' } }, React.createElement(IconChevronRightOutline14, { size: 14, style: { transform: 'rotate(90deg)' } })),
-      menu ? React.createElement('div', { className: 'dgw-actionmenu' }, GIT_ACTIONS.map(([id, label], i) => React.createElement(React.Fragment, { key: id }, i === 3 || i === 7 || i === 10 || i === 18 ? React.createElement('div', { className: 'dgw-actionsep' }) : null, React.createElement('button', { type: 'button', className: 'dgw-action', onClick: () => (BRANCH_ACTION_VERBS[id] ? startBranchAction(id) : run(id)), disabled: (id === 'create-pr' || id === 'push-before-pr') && Boolean(data.pullRequest) }, label), (id === 'create-pr' || id === 'push-before-pr') && data.pullRequest ? React.createElement('div', { style: { padding: '0 12px 5px', fontSize: '11px', color: 'var(--dsw-alias-label-caption)' } }, 'A pull request already exists') : null))) : null,
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          className: 'dgw-stagebtn',
+          disabled: !canCommit,
+          onClick: commit,
+          title: staged === 0 ? 'Stage something first' : !msg.trim() ? 'Write a commit message' : 'Commit staged changes',
+          style: { borderRadius: '8px 0 0 8px' },
+        },
+        React.createElement(IconPlusOutline16, { size: 14 }),
+        busy ? 'Working…' : staged > 0 ? `Commit ${staged} staged` : 'Commit',
+      ),
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          className: 'dgw-stagebtn',
+          'aria-label': 'More Git operations',
+          disabled: busy,
+          onClick: () => setMenu((v) => !v),
+          style: { width: '38px', borderLeft: '1px solid var(--dsw-alias-border-l1)', borderRadius: '0 8px 8px 0' },
+        },
+        React.createElement(IconChevronRightOutline14, { size: 14, style: { transform: 'rotate(90deg)' } }),
+      ),
+      menu ? React.createElement('div', { className: 'dgw-actionmenu' }, GIT_ACTIONS.map(([id, label], i) => menuItem(id, label, i))) : null,
+    ),
+    React.createElement(
+      'div',
+      { style: { fontSize: '10.5px', color: 'var(--dsw-alias-label-caption)', paddingLeft: '2px' } },
+      staged > 0 ? `${staged} staged` : 'Nothing staged',
+      onDispatch ? null : ' — native commands unavailable',
     ),
     branchAction
       ? React.createElement(
@@ -811,55 +1048,190 @@ function CleanState({ text }) {
   )
 }
 
-function ChangesBody({ data, onDispatch, search, viewMode, onOpenDiff, activePath }) {
-  const all = Array.isArray(data.files) ? data.files : []
-  const filtered = filterFiles(all, search)
-  const bulk = onDispatch && !data.clean
-    ? React.createElement(
-        Row,
-        { style: { gap: '6px', paddingBottom: '6px', flex: 'none', flexWrap: 'wrap' } },
-        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', style: { width: 'auto', padding: '0 10px', flex: 'none' }, title: 'Stage every change', onClick: () => onDispatch(actionCommand('stage-all', '', data)) }, 'Stage all'),
-        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', style: { width: 'auto', padding: '0 10px', flex: 'none' }, title: 'Unstage everything', onClick: () => onDispatch(actionCommand('unstage-all', '', data)) }, 'Unstage all'),
-      )
-    : null
-  if (all.length > 0) {
-    return React.createElement(
-      'div',
-      { style: { display: 'flex', flexDirection: 'column' } },
-      bulk,
-      filtered.length > 0
-        ? React.createElement(FileTree, { files: filtered, onDispatch, viewMode, onOpenDiff, activePath })
-        : React.createElement(Muted, null, `No files match “${search}”.`),
-      data.filesTruncated
-        ? React.createElement(
-            'div',
-            { style: { paddingTop: '6px' } },
-            React.createElement(Muted, null, `File list truncated — showing the first ${all.length} changed files.`),
-          )
-        : null,
-    )
+function groupChanges(files) {
+  const groups = { staged: [], unstaged: [], untracked: [] }
+  for (const f of files) {
+    if (f.status === 'untracked') groups.untracked.push(f)
+    else if (f.staged === true) groups.staged.push(f)
+    else groups.unstaged.push(f)
   }
-  const chips = []
-  const c = data.changes
-  if (c && typeof c === 'object') {
-    if (c.modified) chips.push(React.createElement(Stat, { key: 'm', text: `${c.modified} modified` }))
-    if (c.staged) chips.push(React.createElement(Stat, { key: 's', text: `${c.staged} staged`, color: 'var(--dsw-alias-state-success-primary)' }))
-    if (c.untracked) chips.push(React.createElement(Stat, { key: 'u', text: `${c.untracked} untracked` }))
-    if (c.deleted) chips.push(React.createElement(Stat, { key: 'd', text: `${c.deleted} deleted`, color: 'var(--dsw-alias-state-error-primary)' }))
-  }
+  return groups
+}
+
+function ChangeGroup({ id, title, files, open, onToggle, bulk, treeProps, onDispatch, viewMode }) {
+  if (files.length === 0) return null
   return React.createElement(
     'div',
-    { style: { display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start', width: '100%' } },
-    bulk,
-    chips.length ? React.createElement(Row, null, chips) : null,
-    !data.clean ? React.createElement(Muted, null, 'File list unavailable in this session’s data — refresh to fetch it.') : null,
-    data.clean && !chips.length ? React.createElement(CleanState, { text: 'No changes — your working tree is clean.' }) : null,
+    { style: { display: 'flex', flexDirection: 'column' } },
+    React.createElement(
+      'div',
+      {
+        className: 'dgw-grouphd',
+        role: 'button',
+        tabIndex: 0,
+        'aria-expanded': open,
+        onClick: onToggle,
+        onKeyDown: (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onToggle()
+          }
+        },
+      },
+      React.createElement(
+        'span',
+        { className: 'dgw-chevron', 'data-open': String(open) },
+        React.createElement(IconChevronRightOutline14, { size: 12 }),
+      ),
+      React.createElement(
+        'span',
+        { style: { fontSize: '10.5px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--dsw-alias-label-secondary)' } },
+        title,
+      ),
+      React.createElement('span', { style: { fontSize: '10.5px', fontWeight: 600, color: 'var(--dsw-alias-label-caption)' } }, String(files.length)),
+      React.createElement('span', { style: { flex: '1 1 auto' } }),
+      bulk
+        ? React.createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'dgw-minibtn',
+              onClick: (e) => {
+                e.stopPropagation()
+                bulk.onClick()
+              },
+            },
+            bulk.label,
+          )
+        : null,
+    ),
+    open ? React.createElement(FileTree, { files, group: id, onDispatch, viewMode, ...treeProps }) : null,
+  )
+}
+
+function ChangesView({ data, onDispatch, search, searchOpen, onToggleSearch, viewMode, onViewMode, ui, setUi, treeProps }) {
+  const [searchValue, setSearchValue] = React.useState('')
+  const all = Array.isArray(data.files) ? data.files : []
+  const filtered = filterFiles(all, searchOpen ? searchValue : '')
+  const groups = groupChanges(filtered)
+  const total = groups.staged.length + groups.unstaged.length + groups.untracked.length
+  const groupOpen = (id) => !(ui.groupOpen && ui.groupOpen[id] === false)
+  const toggleGroup = (id) =>
+    setUi((prev) => ({
+      groupOpen: { ...(prev.groupOpen || {}), [id]: !(prev.groupOpen && prev.groupOpen[id] !== false) },
+    }))
+  const bulkAction = (label, action) =>
+    onDispatch
+      ? {
+          label,
+          onClick: () => onDispatch({ ...action, next: refreshAction() }),
+        }
+      : null
+  const header = React.createElement(
+    'div',
+    { className: 'dgw-changeshead' },
+    React.createElement(
+      'span',
+      { style: { fontSize: '11px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--dsw-alias-label-secondary)' } },
+      'Changes',
+    ),
+    React.createElement('span', { style: { fontSize: '11px', fontWeight: 600, color: 'var(--dsw-alias-label-caption)' } }, String(countDirty(data))),
+    React.createElement('span', { style: { flex: '1 1 auto' } }),
+    onDispatch && !data.clean
+      ? React.createElement(
+          React.Fragment,
+          null,
+          React.createElement('button', { type: 'button', className: 'dgw-minibtn', title: 'Stage every change', onClick: () => onDispatch({ name: 'git-stage', args: { all: true }, next: refreshAction() }) }, 'Stage all'),
+          React.createElement('button', { type: 'button', className: 'dgw-minibtn', title: 'Unstage everything', onClick: () => onDispatch({ name: 'git-unstage', args: { all: true }, next: refreshAction() }) }, 'Unstage all'),
+        )
+      : null,
+    React.createElement(
+      IconActionBtn,
+      { title: searchOpen ? 'Close search' : 'Search files', onClick: onToggleSearch, tone: searchOpen ? 'var(--dsw-alias-brand-primary)' : undefined },
+      React.createElement(SearchIcon, { size: 13 }),
+    ),
+    all.length > 0 ? React.createElement(ViewModeToggle, { mode: viewMode, onChange: onViewMode }) : null,
+  )
+  const searchBar = searchOpen
+    ? React.createElement(
+        'div',
+        { style: { padding: '3px 0 5px' } },
+        React.createElement('input', {
+          className: 'dgw-textarea',
+          style: { minHeight: '26px', height: '26px' },
+          placeholder: 'Search files by name…',
+          'aria-label': 'Search files by name',
+          autoFocus: true,
+          value: searchValue,
+          onChange: (e) => setSearchValue(e.target.value),
+          onKeyDown: (e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              onToggleSearch()
+            }
+          },
+        }),
+      )
+    : null
+  const body =
+    all.length === 0
+      ? data.clean
+        ? React.createElement(CleanState, { text: 'No changes — your working tree is clean.' })
+        : React.createElement(Muted, null, 'File list unavailable in this session’s data — refresh to fetch it.')
+      : total === 0
+        ? React.createElement(Muted, null, `No files match “${searchValue}”.`)
+        : React.createElement(
+            React.Fragment,
+            null,
+            React.createElement(ChangeGroup, {
+              id: 'staged',
+              title: 'Staged',
+              files: groups.staged,
+              open: groupOpen('staged'),
+              onToggle: () => toggleGroup('staged'),
+              bulk: bulkAction('Unstage', { name: 'git-unstage', args: { all: true } }),
+              treeProps,
+              onDispatch,
+              viewMode,
+            }),
+            React.createElement(ChangeGroup, {
+              id: 'unstaged',
+              title: 'Unstaged',
+              files: groups.unstaged,
+              open: groupOpen('unstaged'),
+              onToggle: () => toggleGroup('unstaged'),
+              bulk: bulkAction('Stage', { name: 'git-stage', args: { all: true } }),
+              treeProps,
+              onDispatch,
+              viewMode,
+            }),
+            React.createElement(ChangeGroup, {
+              id: 'untracked',
+              title: 'Untracked',
+              files: groups.untracked,
+              open: groupOpen('untracked'),
+              onToggle: () => toggleGroup('untracked'),
+              bulk: bulkAction('Stage', { name: 'git-stage', args: { all: true } }),
+              treeProps,
+              onDispatch,
+              viewMode,
+            }),
+          )
+  return React.createElement(
+    'div',
+    { style: { display: 'flex', flexDirection: 'column', paddingBottom: '6px' } },
+    header,
+    searchBar,
+    body,
+    data.filesTruncated
+      ? React.createElement('div', { style: { paddingTop: '6px' } }, React.createElement(Muted, null, `File list truncated — showing the first ${all.length} changed files.`))
+      : null,
   )
 }
 
 const GRAPH_LINE = 'var(--dsw-alias-border-l2)'
 
-function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch, filesViewMode, onDispatch, onOpenDiff, activePath }) {
+function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch, filesViewMode, onDispatch, treeProps }) {
   const isHead = i === 0
   const [open, setOpen] = React.useState(isHead)
   const isLocal = i < ahead
@@ -1023,7 +1395,7 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch
                 // Section's body wrapper in components.js — so this must be
                 // 6px more than the visual 34px target, not 34px itself.)
                 { style: { padding: '0 0 4px', paddingLeft: '40px' } },
-                React.createElement(FileTree, { files: c.files, onDispatch: null, viewMode: filesViewMode, onOpenDiff, activePath }),
+                React.createElement(FileTree, { files: c.files, group: 'commit', onDispatch: null, viewMode: filesViewMode, ...treeProps, onHunkAction: null }),
               )
             : null,
         )
@@ -1031,7 +1403,7 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch
   )
 }
 
-function CommitGraph({ commits, branch, targetBranch, filesViewMode, onDispatch, onOpenDiff, activePath }) {
+function CommitGraph({ commits, branch, targetBranch, filesViewMode, onDispatch, treeProps }) {
   const ahead = branch && typeof branch.ahead === 'number' ? branch.ahead : 0
   const upstream = branch && branch.upstream ? branch.upstream : null
   const branchName = branch && branch.name ? branch.name : null
@@ -1050,8 +1422,7 @@ function CommitGraph({ commits, branch, targetBranch, filesViewMode, onDispatch,
         targetBranch,
         filesViewMode,
         onDispatch,
-        onOpenDiff,
-        activePath,
+        treeProps,
       }),
     ),
   )
@@ -1458,10 +1829,12 @@ function MergeReviewControls({ pr, state, onDispatch }) {
               }),
             ),
             React.createElement('div', { className: 'dgw-actionsep' }),
-            React.createElement(MenuItem, {
+            React.createElement(ConfirmButton, {
+              className: 'dgw-action',
               label: 'Close pull request',
-              color: 'var(--dsw-alias-state-error-primary)',
-              onClick: closePr,
+              confirmLabel: 'Confirm close pull request',
+              style: { color: 'var(--dsw-alias-state-error-primary)', textAlign: 'left' },
+              onConfirm: closePr,
             }),
           )
         : null,
@@ -1645,188 +2018,106 @@ function PrTab({ data, refreshing, onDispatch }) {
   )
 }
 
-function ScTab({ data, refreshing, onDispatch, onOpenPr, onRefresh, canRefresh }) {
-  const dirty = countDirty(data)
-  const hasFiles = Array.isArray(data.files) && data.files.length > 0
-  const [searchOpen, setSearchOpen] = React.useState(false)
-  const [search, setSearch] = React.useState('')
-  const [viewMode, setViewMode] = React.useState('tree')
-  const [commitFilesView, setCommitFilesView] = React.useState('tree')
-  const toggleSearch = () =>
-    setSearchOpen((v) => {
-      if (v) setSearch('')
-      return !v
-    })
-  // Every file tree in this tab (Changes, Committed on branch, Graph) shares
-  // one diff popup instead of each row expanding its own diff in place —
-  // `openDiff` is handed down as `onOpenDiff`, closed over the row's own
-  // `onDispatch` so the "Fetch full diff" CTA still dispatches correctly for
-  // writable trees and is simply absent for read-only ones.
-  const [activeDiff, setActiveDiff] = React.useState(null)
-  const openDiff = (file, dispatch) =>
-    setActiveDiff({
-      file,
-      onAskFull: dispatch ? () => dispatch({ name: 'git-diff', args: { path: file.path } }) : null,
-    })
-  const closeDiff = () => setActiveDiff(null)
-  const activePath = activeDiff ? activeDiff.file.path : null
+function PrSection({ data, refreshing, onDispatch }) {
+  return React.createElement(
+    Section,
+    {
+      key: 'pr',
+      title: 'Pull Request',
+      defaultOpen: true,
+      count: data.pullRequest ? `PR #${data.pullRequest.number}` : null,
+    },
+    React.createElement(PrTab, { data, refreshing, onDispatch }),
+  )
+}
+
+function CommittedSection({ data, treeProps }) {
   const cmpBase = data.comparison && data.comparison.base ? data.comparison.base : null
   const cmpAhead = data.comparison && typeof data.comparison.ahead === 'number' ? data.comparison.ahead : 0
   const cmpFiles = Array.isArray(data.comparison && data.comparison.files) ? data.comparison.files : []
-  const filteredCmpFiles = filterFiles(cmpFiles, search)
+  return React.createElement(
+    Section,
+    { key: 'committed', title: 'Committed on branch', count: cmpFiles.length || null, defaultOpen: false },
+    cmpFiles.length > 0
+      ? React.createElement(FileTree, { files: cmpFiles, group: 'commit', onDispatch: null, viewMode: 'tree', ...treeProps, onHunkAction: null })
+      : React.createElement(
+          Muted,
+          null,
+          cmpBase
+            ? cmpAhead > 0
+              ? 'Commit details are unavailable.'
+              : `No commits ahead of ${cmpBase}.`
+            : 'No base branch to compare against.',
+        ),
+  )
+}
+
+function GraphSection({ data, treeProps, commitFilesView, onCommitFilesView, onRefresh, refreshing, canRefresh, onDispatch }) {
   const commits = Array.isArray(data.commits) ? data.commits : []
-  // The PR's base is the branch we're actually merging into — strictly more
-  // meaningful than our own upstream. `comparison` only reflects it once the
-  // backend has resolved that base (see gitWorkspace's compareBase), so gate
-  // on the names matching rather than trusting comparison unconditionally.
+  if (commits.length === 0) return null
   const prBase = data.pullRequest && data.pullRequest.base ? data.pullRequest.base : null
   const targetBranch =
     prBase && data.comparison && data.comparison.base === prBase && typeof data.comparison.ahead === 'number'
       ? { name: prBase, ahead: data.comparison.ahead }
       : null
   return React.createElement(
-    React.Fragment,
-    null,
-    React.createElement(BranchHeader, {
-      data,
-      refreshing,
-      onOpenPr,
-      searchOpen,
-      onToggleSearch: toggleSearch,
-      search,
-      onSearchChange: setSearch,
-    }),
-    !data.clean && onDispatch ? React.createElement(CommitBox, { onDispatch, data }) : null,
-    React.createElement(
-      Section,
-      {
-        title: 'Changes',
-        count: dirty || null,
-        defaultOpen: true,
-        right: hasFiles ? React.createElement(ViewModeToggle, { mode: viewMode, onChange: setViewMode }) : null,
-      },
-      React.createElement(ChangesBody, { data, onDispatch, search, viewMode, onOpenDiff: openDiff, activePath }),
-    ),
-    React.createElement(
-      Section,
-      { title: 'Committed on branch', count: cmpFiles.length || null, defaultOpen: true },
-      cmpFiles.length > 0
-        ? filteredCmpFiles.length > 0
-          ? React.createElement(FileTree, { files: filteredCmpFiles, onDispatch: null, viewMode: 'tree', onOpenDiff: openDiff, activePath })
-          : React.createElement(Muted, null, `No files match “${search}”.`)
-        : React.createElement(
-            Muted,
-            null,
-            cmpBase
-              ? cmpAhead > 0
-                ? 'Commit details are unavailable.'
-                : `No commits ahead of ${cmpBase}.`
-              : 'No base branch to compare against.',
-          ),
-    ),
-    commits.length > 0
-      ? React.createElement(
-          Section,
-          {
-            title: 'Graph',
-            count: commits.length,
-            defaultOpen: true,
-            right: React.createElement(GraphViewMenu, {
-              mode: commitFilesView,
-              onChange: setCommitFilesView,
-              onRefresh: canRefresh !== false ? onRefresh : null,
-              refreshing,
-            }),
-          },
-          React.createElement(CommitGraph, { commits, branch: data.branch, targetBranch, filesViewMode: commitFilesView, onDispatch, onOpenDiff: openDiff, activePath }),
-        )
-      : null,
-    activeDiff
-      ? React.createElement(
-          Modal,
-          { onClose: closeDiff },
-          React.createElement(DiffViewer, { file: activeDiff.file, onClose: closeDiff, onAskFull: activeDiff.onAskFull }),
-        )
-      : null,
-  )
-}
-
-function TabBar({ tab, setTab, prHint }) {
-  const mk = (id, label, badge) =>
-    React.createElement(
-      'button',
-      {
-        type: 'button',
-        onClick: () => setTab(id),
-        role: 'tab',
-        'aria-selected': tab === id,
-        style: {
-          flex: '1 1 50%',
-          padding: '9px 0 8px',
-          background: 'none',
-          border: 'none',
-          borderBottom: tab === id ? '2px solid var(--dsw-alias-brand-primary)' : '2px solid transparent',
-          color: tab === id ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
-          fontWeight: tab === id ? 600 : 400,
-          cursor: 'pointer',
-          fontFamily: 'var(--dsw-font-family)',
-          fontSize: '11px',
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase',
-          whiteSpace: 'nowrap',
-        },
-      },
-      label,
-      badge != null ? React.createElement('span', { style: { marginLeft: '5px', color: 'var(--dsw-alias-label-caption)' } }, badge) : null,
-    )
-  return React.createElement(
-    'div',
+    Section,
     {
-      style: {
-        position: 'sticky',
-        top: 0,
-        zIndex: 2,
-        display: 'flex',
-        margin: '0 -14px',
-        padding: '0 14px',
-        background: 'var(--dsw-alias-bg-layer-2)',
-        borderBottom: '1px solid var(--dsw-alias-border-l1)',
-      },
+      key: 'graph',
+      title: 'Graph',
+      count: commits.length,
+      defaultOpen: false,
+      right: React.createElement(GraphViewMenu, {
+        mode: commitFilesView,
+        onChange: onCommitFilesView,
+        onRefresh: canRefresh !== false ? onRefresh : null,
+        refreshing,
+      }),
     },
-    mk('sc', 'Source Control'),
-    mk('pr', 'Pull Request', prHint),
+    React.createElement(CommitGraph, {
+      commits,
+      branch: data.branch,
+      targetBranch,
+      filesViewMode: commitFilesView,
+      onDispatch,
+      treeProps: { ...treeProps, onHunkAction: null },
+    }),
   )
 }
 
-export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRefresh, autoSampled, onRefresh, onDispatch, commandsUnsupported }) {
-  const [tab, setTab] = React.useState('sc')
-
-  // Fallback-only: when no projection payload exists at all, the PR tab
-  // forces one native /git-refresh per repo/branch after a short grace.
-  // Once local sampling is proven alive (autoSampled), pullRequest/ci
-  // arrive on their own.
-  const prAutoRef = React.useRef(null)
-  React.useEffect(() => {
-    if (autoSampled || tab !== 'pr' || !data || data.pullRequest) return
-    if (canRefresh === false || !onRefresh) return
-    const repo = (data.repository && data.repository.name) || ''
-    const branch = (data.branch && data.branch.name) || ''
-    const key = `${repo}:${branch}`
-    if (prAutoRef.current === key) return
-    const t = setTimeout(() => {
-      prAutoRef.current = key
-      if (!refreshing) onRefresh()
-    }, 2000)
-    return () => clearTimeout(t)
-  }, [autoSampled, tab, data, refreshing, canRefresh, onRefresh])
+export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRefresh, autoSampled, onRefresh, onDispatch, commandsUnsupported, uiKey }) {
+  const scope = uiKey || uiScope(data)
+  const [ui, setUi] = usePanelUi(scope)
+  const [searchOpen, setSearchOpen] = React.useState(false)
+  const [commitFilesView, setCommitFilesView] = React.useState('tree')
+  const hunkAction = (file, action, hunk) => {
+    if (!onDispatch) return
+    const name = action === 'stage' ? 'git-stage-hunk' : action === 'unstage' ? 'git-unstage-hunk' : 'git-discard-hunk'
+    const side = action === 'unstage' ? 'staged' : 'unstaged'
+    return onDispatch({
+      name,
+      args: { path: file.path, side, hunk, ...(action === 'discard' ? { confirm: true } : {}) },
+      next: refreshAction(),
+    })
+  }
+  const treeProps = {
+    selectedKey: ui.selectedKey,
+    onSelect: (key) => setUi((prev) => ({ selectedKey: prev.selectedKey === key ? null : key })),
+    dirOpen: ui.dirOpen,
+    onToggleDir: (key, open) => setUi((prev) => ({ dirOpen: { ...(prev.dirOpen || {}), [key]: open } })),
+    diffMode: ui.diffMode,
+    onDiffMode: (mode) => setUi({ diffMode: mode }),
+    onHunkAction: hunkAction,
+    onCloseDiff: () => setUi({ selectedKey: null }),
+  }
 
   let body
   if (loading) {
-    body = React.createElement(Row, { style: { padding: '10px' } }, React.createElement(Muted, null, 'Loading Git workspace…'))
+    body = React.createElement(Row, { style: { padding: '10px', flex: 'none' } }, React.createElement(Muted, null, 'Loading Git workspace…'))
   } else if (!data) {
     body = React.createElement(
       'div',
-      { style: { padding: '14px 2px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start' } },
+      { style: { padding: '14px 2px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start', flex: 'none' } },
       React.createElement(
         Muted,
         null,
@@ -1838,29 +2129,55 @@ export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRef
       ),
     )
   } else {
-    const prComments = data.pullRequest && Array.isArray(data.pullRequest.comments) ? data.pullRequest.comments : []
-    const prUnresolved = prComments.filter((c) => !c.resolved).length
     body = React.createElement(
       React.Fragment,
       null,
       commandsUnsupported
         ? React.createElement(
             Row,
-            { style: { padding: '6px 8px', marginBottom: '8px', flex: 'none', borderRadius: '6px', background: 'var(--dsw-alias-state-warn-secondary, transparent)', border: '1px solid var(--dsw-alias-border-l1)' } },
+            { style: { padding: '6px 8px', marginBottom: '4px', flex: 'none', borderRadius: '6px', background: 'var(--dsw-alias-state-warn-secondary, transparent)', border: '1px solid var(--dsw-alias-border-l1)' } },
             React.createElement(IconWarningOutline16, { size: 14 }),
             React.createElement(Muted, null, COMMANDS_UNSUPPORTED_HINT),
           )
         : null,
-      React.createElement(TabBar, { tab, setTab, prHint: data.pullRequest ? (prUnresolved || null) : null }),
-      tab === 'pr'
-        ? React.createElement(PrTab, { data, refreshing, onDispatch })
-        : React.createElement(ScTab, { data, refreshing, onDispatch, onOpenPr: () => setTab('pr'), onRefresh, canRefresh }),
+      React.createElement(StatusBar, { data, onDispatch, refreshing }),
+      React.createElement(
+        'div',
+        { className: 'dgw-scroll' },
+        React.createElement(ChangesView, {
+          data,
+          onDispatch,
+          searchOpen,
+          onToggleSearch: () => setSearchOpen((v) => !v),
+          viewMode: ui.treeMode,
+          onViewMode: (mode) => setUi({ treeMode: mode }),
+          ui,
+          setUi,
+          treeProps,
+        }),
+        React.createElement(PrSection, { data, refreshing, onDispatch }),
+        React.createElement(CommittedSection, { data, treeProps }),
+        React.createElement(GraphSection, {
+          data,
+          treeProps,
+          commitFilesView,
+          onCommitFilesView: setCommitFilesView,
+          onRefresh,
+          refreshing,
+          canRefresh,
+          onDispatch,
+        }),
+      ),
+      React.createElement(CommitBar, { data, onDispatch, onRefresh, ui, setUi }),
     )
   }
 
   return React.createElement(
     'div',
-    { 'data-git-workspace-panel': '', style: { padding: '0 14px 12px', display: 'flex', flexDirection: 'column' } },
+    {
+      'data-git-workspace-panel': '',
+      style: { padding: '0 14px 12px', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 },
+    },
     body,
   )
 }
