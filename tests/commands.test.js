@@ -112,6 +112,13 @@ test('github read commands are registered (network calls not exercised here)', a
   }
 })
 
+test('hunk write commands are registered', async () => {
+  const registered = await registerAll()
+  for (const name of ['git-stage-hunk', 'git-unstage-hunk', 'git-discard-hunk']) {
+    assert.ok(registered.has(name), `${name} is registered`)
+  }
+})
+
 test('a session with no workspace directory fails every command instead of throwing', async () => {
   const registered = await registerAll()
   for (const name of ['git-workspace', 'git-status', 'git-branches', 'git-stash']) {

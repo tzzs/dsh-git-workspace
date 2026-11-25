@@ -29,6 +29,9 @@ import {
   gitMerge,
   gitReset,
   gitDiscardPaths,
+  gitStageHunk,
+  gitUnstageHunk,
+  gitDiscardHunk,
   githubPr,
   githubPrCreate,
   githubPrDiff,
@@ -871,6 +874,94 @@ export function apply(ctx: {
           )
         return genericResult('Discard', result.content)
       },
+    },
+  })
+
+  // ---- git_stage_hunk ----------------------------------------------------
+  register(ctx, {
+    name: 'git_stage_hunk',
+    description:
+      'Write tool. Stages exactly one hunk from an unstaged tracked file into the Git index (git apply --cached). Identify the hunk by its oldStart/oldLines/newStart/newLines from git_workspace or git_diff.',
+    parameters: {
+      path: str,
+      side: { type: 'string', enum: ['unstaged'] },
+      hunk: { type: 'object', additionalProperties: true },
+    },
+    execute: (a) => gitStageHunk(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`stage hunk failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as { path?: string }
+      return text(`Staged one hunk in ${v.path ?? 'the file'}.`)
+    },
+    presenters: {
+      presentCall: () => genericCall('Stage hunk'),
+      presentResult: (_a, result) =>
+        result.isError
+          ? genericResult(errorTitle(result, 'Stage hunk') ?? 'Stage hunk', result.content)
+          : genericResult('Hunk staged', result.content),
+    },
+  })
+
+  // ---- git_unstage_hunk ---------------------------------------------------
+  register(ctx, {
+    name: 'git_unstage_hunk',
+    description:
+      'Write tool. Unstages exactly one staged hunk (git apply --cached --reverse), keeping its working-tree changes. Identify the hunk by its oldStart/oldLines/newStart/newLines.',
+    parameters: {
+      path: str,
+      side: { type: 'string', enum: ['staged'] },
+      hunk: { type: 'object', additionalProperties: true },
+    },
+    execute: (a) => gitUnstageHunk(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`unstage hunk failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as { path?: string }
+      return text(`Unstaged one hunk in ${v.path ?? 'the file'}.`)
+    },
+    presenters: {
+      presentCall: () => genericCall('Unstage hunk'),
+      presentResult: (_a, result) =>
+        result.isError
+          ? genericResult(errorTitle(result, 'Unstage hunk') ?? 'Unstage hunk', result.content)
+          : genericResult('Hunk unstaged', result.content),
+    },
+  })
+
+  // ---- git_discard_hunk ---------------------------------------------------
+  register(ctx, {
+    name: 'git_discard_hunk',
+    description:
+      'Write tool. Permanently reverts one unstaged hunk in the working tree (git apply --reverse). Requires confirm:true; unlike git_unstage_hunk this destroys the change.',
+    parameters: {
+      path: str,
+      side: { type: 'string', enum: ['unstaged'] },
+      hunk: { type: 'object', additionalProperties: true },
+      confirm: bool,
+    },
+    execute: (a) => gitDiscardHunk(a as never),
+    render: (_a, value) => {
+      if (isError(value)) {
+        const e = value.error as { message?: string; hint?: string }
+        const hint = e.hint ? `\n${e.hint}` : ''
+        return text(`discard hunk failed: ${e.message ?? 'unknown error'}${hint}`)
+      }
+      const v = value as { path?: string }
+      return text(`Discarded one hunk in ${v.path ?? 'the file'}.`)
+    },
+    presenters: {
+      presentCall: () => genericCall('Discard hunk'),
+      presentResult: (_a, result) =>
+        result.isError
+          ? genericResult(errorTitle(result, 'Discard hunk') ?? 'Discard hunk', result.content)
+          : genericResult('Hunk discarded', result.content),
     },
   })
 

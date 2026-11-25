@@ -19,6 +19,7 @@ import { gitCheckout } from '../git/checkout.js'
 import { gitMerge } from '../git/merge.js'
 import { gitReset } from '../git/reset.js'
 import { gitDiscardPaths } from '../git/discard_paths.js'
+import { gitStageHunk, gitUnstageHunk, gitDiscardHunk } from '../git/hunk.js'
 import { githubPr } from '../github/pr.js'
 import { githubPrCreate } from '../github/pr_create.js'
 import { githubPrDiff } from '../github/pr_diff.js'
@@ -60,6 +61,9 @@ export {
   gitMerge,
   gitReset,
   gitDiscardPaths,
+  gitStageHunk,
+  gitUnstageHunk,
+  gitDiscardHunk,
   githubPr,
   githubPrCreate,
   githubPrDiff,

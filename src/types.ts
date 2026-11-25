@@ -29,6 +29,8 @@ export interface GitFile {
   status: GitFileStatus
   staged: boolean
   unstaged?: boolean
+  indexStatus?: GitFileStatus
+  worktreeStatus?: GitFileStatus
 }
 
 export interface CommitSummary {
