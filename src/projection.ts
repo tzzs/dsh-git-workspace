@@ -19,9 +19,11 @@ declare module '@deepseek-ai/dsh-session/types' {
 
 interface ProjectionUnit {
   key: string
+  schema: { parse(value: unknown): unknown }
   stateSchema: { parse(value: unknown): unknown }
   init(): unknown
   apply(state: unknown, event: { type: string; data?: unknown }): unknown
+  view(state: unknown): unknown
   wire: {
     viewSchema: { parse(value: unknown): unknown }
     view(state: unknown): unknown
@@ -43,10 +45,12 @@ function parseSample(value: unknown): unknown {
 
 const unit: ProjectionUnit = {
   key: WORKSPACE_PROJECTION_KEY,
+  schema: { parse: parseSample },
   stateSchema: { parse: parseSample },
   init: () => null,
   apply: (state, event) =>
     event.type === WORKSPACE_EVENT && isWorkspaceSample(event.data) ? event.data : state,
+  view: (state) => state,
   wire: {
     viewSchema: { parse: parseSample },
     view: (state) => state,

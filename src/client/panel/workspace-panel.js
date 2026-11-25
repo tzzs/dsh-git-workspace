@@ -733,10 +733,12 @@ function BranchHeader({ data, refreshing, onOpenPr, searchOpen, onToggleSearch, 
 function actionCommand(action, message, data, branch) {
   const base = (data.comparison && data.comparison.base) || 'main'
   const head = data.branch && data.branch.name
-  const firstCommit =
-    Array.isArray(data.commits && data.commits.recent) && data.commits.recent.length > 0
-      ? String(data.commits.recent[0].message || '').split('\n')[0].trim()
-      : ''
+  const commits = Array.isArray(data.commits)
+    ? data.commits
+    : Array.isArray(data.commits && data.commits.recent)
+      ? data.commits.recent
+      : []
+  const firstCommit = commits.length > 0 ? String(commits[0].message || '').split('\n')[0].trim() : ''
   const title = firstCommit || `Merge ${head || 'branch'} into ${base}`
   const body = `${data.repository && data.repository.name ? `Pull request for \`${data.repository.name}\`.\n\n` : ''}Created from the Git Workspace panel.`
   switch (action) {
@@ -1909,7 +1911,7 @@ function PrTab({ data, refreshing, onDispatch }) {
   const pr = data.pullRequest
   if (!pr) {
     const upstream = data.branch && data.branch.upstream
-    const target = upstream || (data.comparison && data.comparison.base)
+    const target = (data.comparison && data.comparison.base) || upstream
     return React.createElement(
       'div',
       { style: { padding: '12px 2px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start', flex: 'none' } },
@@ -1950,7 +1952,6 @@ function PrTab({ data, refreshing, onDispatch }) {
   const comments = Array.isArray(pr.comments) ? pr.comments : []
   const additions = typeof data.additionsTotal === 'number' ? data.additionsTotal : 0
   const deletions = typeof data.deletionsTotal === 'number' ? data.deletionsTotal : 0
-  const upstream = data.branch && data.branch.upstream
   const pending = typeof data.commitsAhead === 'number' ? data.commitsAhead : (data.branch && data.branch.ahead) || 0
   return React.createElement(
     React.Fragment,
@@ -1983,10 +1984,24 @@ function PrTab({ data, refreshing, onDispatch }) {
       React.createElement(
         'div',
         { style: { display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '2px', fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px' } },
-        React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)' } }, `+${fmtNum(additions)}`),
-        React.createElement('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, `-${fmtNum(deletions)}`),
-        upstream ? React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, `remote ${upstream}`) : null,
-        React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, `${pending} pending commit${pending === 1 ? '' : 's'}`),
+        additions || deletions
+          ? React.createElement(
+              React.Fragment,
+              null,
+              React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)' } }, `+${fmtNum(additions)}`),
+              React.createElement('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, `-${fmtNum(deletions)}`),
+            )
+          : null,
+        pr.base
+          ? React.createElement(
+              'span',
+              { style: { color: 'var(--dsw-alias-label-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+              `${(data.branch && data.branch.name) || pr.base} → ${pr.base}`,
+            )
+          : null,
+        pending > 0
+          ? React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, `${pending} pending commit${pending === 1 ? '' : 's'}`)
+          : null,
         onDispatch
           ? React.createElement(
               'button',

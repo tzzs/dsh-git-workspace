@@ -635,7 +635,7 @@ test('projection error falls back to usable tool-result data', () => {
 // Stateful React mock: hooks live in per-component-instance buckets refilled
 // left-to-right on every execution of that component, so setState + re-render
 // cycles behave predictably without a real React reconciler.
-function interactiveHeader(conversation, { ctxExtras = {}, compProps = {} } = {}) {
+function interactiveHeader(conversation, { ctxExtras = {}, compProps = {}, externals } = {}) {
   const store = new Map()
   let current = null
   const ReactStateful = {
@@ -688,7 +688,7 @@ function interactiveHeader(conversation, { ctxExtras = {}, compProps = {} } = {}
       current = prev
     }
   }
-  const { plugin } = loadBundle(ReactStateful)
+  const { plugin } = loadBundle(ReactStateful, externals)
   const { registrations } = collectRegistrations(plugin, ctxExtras)
   const comp = registrations.find((r) => r.def.id === 'git-workspace').comp
   const props = { useSession: (sel) => sel(conversation), sessionId: 's1', ...compProps }
@@ -1185,6 +1185,14 @@ test('an unmatched native command disables the whole panel with an explicit hint
     ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Stage all').length,
     0,
     'write controls disappear once native commands are known unsupported',
+  )
+  const fileRow = ui.findEls(body, (el) => el.props && String(el.props.className || '').includes('dgw-filebtn')).find((el) => ownText(el).includes('a.ts'))
+  fileRow.props.onClick()
+  ;({ body } = ui.render())
+  assert.equal(
+    ui.findEls(body, (el) => el.type === 'button' && /^(Stage|Unstage|Discard) hunk$/.test(ownText(el))).length,
+    0,
+    'hunk controls disappear with the rest of the write actions',
   )
   assert.deepEqual(mock.prompts, [], 'no chat fallback is ever used, even once native support is ruled out')
 })
@@ -2220,4 +2228,131 @@ test('the panel has no tabs; PR content and checks live in the same flow', () =>
   assert.ok(ui.findEls(body, (el) => el.type === 'span' && ownText(el) === 'PR #7').length > 0, 'PR status renders inline')
   assert.ok(ui.findEls(body, (el) => el.props && el.props.title === 'Merge this pull request with the selected method').length > 0, 'merge control renders inline')
   assert.equal(ui.findEls(body, (el) => el.props && el.props.title === 'Fetch failure logs').length, 0, 'passing checks do not show a log CTA')
+})
+
+test('push publishes a branch without an upstream; pull stays disabled until one exists', async () => {
+  const mock = sessionMock()
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: null, ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: null,
+          ci: null,
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation, { ctxExtras: withSessions(mock) })
+  const { body } = ui.render()
+  const byLabel = (label) => ui.findEls(body, (el) => el.type === 'button' && ownText(el) === label)[0]
+  assert.equal(byLabel('Pull').props.disabled, true, 'pull needs an upstream')
+  assert.notEqual(byLabel('Push').props.disabled, true, 'push can publish a new branch')
+  await byLabel('Push').props.onClick()
+  await flush()
+  assert.deepEqual(mock.commands, ['/git-push {}', '/git-refresh {}'])
+})
+
+test('Create PR takes its title from the sampled commit array and targets the comparison base', async () => {
+  const mock = sessionMock()
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 2, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: null,
+          ci: null,
+          commits: [{ shortSha: 'abc1234', message: 'feat: sampled title', author: 'me', date: 'now' }],
+          comparison: { base: 'main', ahead: 2, behind: 0 },
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation, { ctxExtras: withSessions(mock) })
+  const { body } = ui.render()
+  assert.ok(ui.findEls(body, (el) => ownText(el) === '→ main').length > 0, 'the empty PR target prefers the comparison base over the upstream')
+  assert.equal(ui.findEls(body, (el) => ownText(el) === '→ origin/feature/x').length, 0, 'the upstream is not presented as the PR target')
+  const create = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Create PR')[0]
+  await create.props.onClick()
+  await flush()
+  const line = mock.commands.find((c) => c.startsWith('/git-pr-create '))
+  const args = JSON.parse(line.slice('/git-pr-create '.length))
+  assert.equal(args.title, 'feat: sampled title')
+  assert.equal(args.base, 'main')
+  assert.equal(args.head, 'feature/x')
+})
+
+test('the PR header names the head and base branch and hides empty line stats', () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: { number: 7, title: 'Add thing', state: 'OPEN', base: 'main', merged: false, url: 'https://github.com/o/r/pull/7', comments: [] },
+          ci: null,
+          additionsTotal: 0,
+          deletionsTotal: 0,
+          commitsAhead: 0,
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation)
+  const { body } = ui.render()
+  assert.ok(ui.findEls(body, (el) => ownText(el) === 'feature/x → main').length > 0)
+  assert.equal(ui.findEls(body, (el) => ownText(el) === '+0').length, 0, 'empty stats are hidden')
+  assert.equal(ui.findEls(body, (el) => ownText(el) === '-0').length, 0, 'empty stats are hidden')
+})
+
+test('client icons resolve against the current primitives names', () => {
+  const stub = (name) => Object.assign(() => null, { stubName: name })
+  const primitives = new Proxy(
+    { writeClipboard: () => {} },
+    {
+      get(target, key) {
+        if (typeof key !== 'string') return undefined
+        if (key === 'writeClipboard') return target[key]
+        if (key === 'Tooltip' || key === 'Pill' || key === 'StateDot' || key === 'Button') {
+          if (!target[key]) target[key] = stub(key)
+          return target[key]
+        }
+        if (/^Icon.*(Regular|Medium)$/.test(key)) {
+          if (!target[key]) target[key] = stub(key)
+          return target[key]
+        }
+        return undefined
+      },
+    },
+  )
+  const ui = interactiveHeader(DIFF_CONVERSATION, { externals: { primitives } })
+  const { body, drawerEl } = ui.render()
+  assert.ok(ui.findEls(body, (el) => el.type && el.type.stubName === 'IconBranchOutlineRegular').length > 0, 'branch icon resolves to the Regular export')
+  const closeTip = ui.findEls(drawerEl, (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === 'Close Git workspace (Esc)')[0]
+  const closeBtn = Array.isArray(closeTip.props.children) ? closeTip.props.children[0] : closeTip.props.children
+  assert.equal(closeBtn.props.children.type.stubName, 'IconCloseFillRegular', 'close icon resolves to the Regular export')
+  assert.equal(ui.findEls(body, (el) => el.type && /Outline(14|16)$/.test(el.type.stubName || '')).length, 0, 'no numbered icon names are assumed')
 })
