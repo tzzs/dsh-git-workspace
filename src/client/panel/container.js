@@ -1,11 +1,7 @@
 import * as React from 'react'
 import * as ReactDOM from 'react-dom'
-import {
-  IconBranchOutline16,
-  IconRefreshOutline14,
-  Pill,
-  Tooltip,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { Pill, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconBranchOutline16, IconRefreshOutline14 } from '../icons.js'
 import { GitWorkspacePanel } from './workspace-panel.js'
 import { uiScope } from './ui-state.js'
 import { Drawer } from './drawer.js'

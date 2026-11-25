@@ -10,8 +10,8 @@ import {
   IconRefreshOutline14,
   IconRightUpOutline16,
   IconWarningOutline16,
-  Tooltip,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from '../icons.js'
+import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   Row,
   Code,
@@ -850,7 +850,7 @@ function StatusBar({ data, onDispatch, refreshing }) {
             { style: { display: 'inline-flex', gap: '4px', flex: 'none' } },
             syncBtn('git-fetch', 'Fetch', 'Fetch from remote', false),
             syncBtn('git-pull', 'Pull', 'Pull (fast-forward only)', !branch.upstream),
-            syncBtn('git-push', 'Push', 'Push to remote', !branch.upstream),
+            syncBtn('git-push', 'Push', branch.upstream ? 'Push to remote' : 'Publish this branch to origin', false),
           )
         : null,
     ),
@@ -2107,7 +2107,7 @@ export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRef
     onToggleDir: (key, open) => setUi((prev) => ({ dirOpen: { ...(prev.dirOpen || {}), [key]: open } })),
     diffMode: ui.diffMode,
     onDiffMode: (mode) => setUi({ diffMode: mode }),
-    onHunkAction: hunkAction,
+    onHunkAction: onDispatch ? hunkAction : null,
     onCloseDiff: () => setUi({ selectedKey: null }),
   }
 

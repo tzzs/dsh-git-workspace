@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { IconCloseFill14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseFill14 } from '../icons.js'
 import { IconBtn } from '../components.js'
 
 const WIDTH_KEY = 'dsh-git-workspace.width'

@@ -1,5 +1,6 @@
 import * as React from 'react'
-import { Button, IconCloseFill14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseFill14 } from '../icons.js'
 import { Code, Muted, IconBtn, ConfirmButton, ensureStyles } from '../components.js'
 
 const STATUS_LETTER = {

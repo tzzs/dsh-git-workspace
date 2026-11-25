@@ -1,5 +1,6 @@
 import * as React from 'react'
-import { IconRightUpOutline16, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconRightUpOutline16 } from '../icons.js'
 import { Card, Row, Muted, Dot, checkDotState, ciOverallState } from '../components.js'
 import { blockMeta } from '../common.js'
 

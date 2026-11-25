@@ -4,10 +4,12 @@ import {
   Tooltip,
   StateDot,
   writeClipboard,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+import {
   IconCheckOutline14,
   IconCopyOutline16,
   IconChevronRightOutline14,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from './icons.js'
 
 const S = {
   card: {
