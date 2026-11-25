@@ -101,11 +101,11 @@ src/client/
     │                         #   + portal-mounted right-side drawer + native-command refresh
     ├── drawer.js             # reusable side drawer: backdrop, ESC close, drag-resize,
     │                         #   width persistence, slide-in animation
-    ├── diff-viewer.js        # shared diff popup content: hunk header, Unified/Split
+    ├── ui-state.js           # localStorage-backed panel state per repo/branch
+    ├── diff-viewer.js        # inline diff: hunk header + actions, Unified/Split
     │                         #   toggle, unified and left/right split line rendering
-    └── workspace-panel.js    # collapsible sections: changes (grouped staged/unstaged/
-                              #   untracked with hover stage/unstage/discard controls),
-                              #   commits, PR merge/review, plus the commit box and menu
+    └── workspace-panel.js    # one flow: status bar, grouped changes with inline diffs,
+                              #   PR section, commit bar, history sections
 ```
 
 ## Data flow
@@ -188,8 +188,8 @@ With the projection registry present, data refreshes automatically after each
 turn and the panel never prompts the agent on its own. Whether sampling is
 alive is decided by a latch: the first projection payload (value or
 structured error) flips `autoSampled`, and from then on the panel trusts the
-sampler — the PR tab's old "auto-ask the agent when no pull request is
-loaded" behavior stays disabled even when the branch genuinely has no PR.
+sampler — the old "auto-ask the agent when no pull request is loaded"
+behavior stays disabled even when the branch genuinely has no PR.
 
 There is no chat/agent-turn fallback anywhere in the panel, not even as a
 degraded path. Every action — refresh included — goes through
@@ -198,9 +198,8 @@ Firing `/git-refresh {}` remains for:
 
 - sessions where no projection payload ever arrived (headless CLI, or a host
   without the projection subsystem): opening the drawer with no data
-  force-refreshes once per open, and the PR tab does the same once per
-  repo/branch when it has no pull request data yet. Both wait out a short
-  2 s grace first, so a slow first sample never triggers a pointless
+  force-refreshes once per open. It waits out a short 2 s grace first, so a
+  slow first sample never triggers a pointless
   request. The drawer shows a loading state for that window instead of a
   manual "run it yourself" control — there is nothing left for a person to
   click.
@@ -463,8 +462,8 @@ a button, `toolCommand` already wraps the tool):
 | `github_pr_reviews` | `git-pr-reviews` | — |
 | `github_pr_comments` | `git-pr-comments` | — (the panel renders comments from the sampled meta) |
 | `github_ci` | `git-ci` | — (the panel renders check status from the sampled meta) |
-| `github_ci_logs` | `git-ci-logs` | Failing check rows' "Fetch failure logs" icon button (PR tab); `runId` is parsed from the check's `/actions/runs/(\d+)` URL, so only checks with a GitHub Actions URL show the button |
-| `github_ci_annotations` | `git-ci-annotations` | Each expanded check row's "Fetch annotations" button (PR tab); `checkId` is parsed from the check's `/actions/runs/\d+/job/(\d+)` URL |
+| `github_ci_logs` | `git-ci-logs` | Failing check rows' "Fetch failure logs" icon button (PR section); `runId` is parsed from the check's `/actions/runs/(\d+)` URL, so only checks with a GitHub Actions URL show the button |
+| `github_ci_annotations` | `git-ci-annotations` | Each expanded check row's "Fetch annotations" button (PR section); `checkId` is parsed from the check's `/actions/runs/\d+/job/(\d+)` URL |
 | `github_issue` | `git-issue` | — |
 | `github_issue_comments` | `git-issue-comments` | — |
 | `github_releases` | `git-releases` | — |
