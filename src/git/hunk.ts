@@ -147,6 +147,13 @@ async function runHunk(
     return error('GIT_COMMAND_FAILED', `Unable to read the diff${stderr.trim() ? `: ${stderr.trim().split('\n')[0]}` : '.'}`)
   }
   const chunk = parseChunks(patch).find((c) => c.path === input.path || c.oldPath === input.path)
+  if (chunk && chunk.preamble.some((l) => /^(rename|copy) (from|to) /.test(l))) {
+    return error(
+      'HUNK_UNSUPPORTED',
+      `Per-hunk actions are not supported for renamed or copied files (${input.path}).`,
+      'Stage or unstage the whole file instead.',
+    )
+  }
   const hunk = chunk && chunk.hunks.find((h) => sameHunk(h.meta, input.hunk))
   if (!chunk || !hunk) {
     return error(
