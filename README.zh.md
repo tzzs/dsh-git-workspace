@@ -16,7 +16,7 @@
 
 ### Tools
 
-插件共提供 34 个 Agent Tools——22 个只读发现 Tool 加 12 个写 Tool，按类别组织。
+插件共提供 40 个 Agent Tools——23 个只读发现 Tool 加 17 个写 Tool，按类别组织。
 
 #### Workspace
 
@@ -54,12 +54,16 @@
 | --- | --- |
 | `git_stage` | 将工作区文件加入暂存区（`paths` 或 `all:true`） |
 | `git_unstage` | 将文件移出暂存区，保留工作区改动（`paths` 或 `all:true`） |
+| `git_stage_hunk` | 只将未暂存文件的一个 hunk 加入暂存区（`path` + hunk 头字段） |
+| `git_unstage_hunk` | 只将一个已暂存 hunk 移出暂存区，保留工作区改动 |
+| `git_discard_hunk` | 丢弃工作区中的一个 hunk；必须传入 `confirm:true` |
 | `git_commit` | 用已暂存的改动在当前分支创建提交（message 必填；可选 `amend`/`allowEmpty`） |
 | `git_branch_create` | 从可选起点创建本地分支，默认同时切换过去 |
 | `git_checkout` | 切换到另一个分支（或用 `create:true` 先创建）；会覆盖本地未提交改动时拒绝执行 |
 | `git_merge` | 将其他分支合并进当前分支；冲突时返回 `conflictedFiles`，绝不自动解决冲突 |
 | `git_push` | 将分支推送到 remote（默认设置 upstream）；`force:true` 会改写远端历史，且绝不会被自动触发 |
 | `git_reset` | 移动当前分支（`soft`/`mixed`/`hard`）；`hard` 会丢弃所有未提交改动，必须显式传入 `confirm:true` |
+| `git_discard_paths` | 只还原指定路径下的已跟踪改动并删除未跟踪文件（作用域受限的 `git restore` + `git clean`）；必须传入 `confirm:true` |
 
 #### 写操作（GitHub）
 
@@ -69,6 +73,7 @@
 | --- | --- |
 | `github_pr_create` | 通过 `gh pr create` 为分支创建 PR；title/body 未同时给出时会从提交历史自动填充 |
 | `github_pr_merge` | 合并 PR（`merge`/`squash`/`rebase`），可选删除源分支——对远端不可逆 |
+| `github_pr_close` | 关闭 PR，不执行合并 |
 | `github_pr_comment` | 在 PR 上发表评论 |
 | `github_pr_review` | 提交 review（`APPROVE`、`REQUEST_CHANGES` 或 `COMMENT`；request changes 需要附 body） |
 
@@ -82,6 +87,7 @@
 | `github_pr_comments` | conversation 与 inline review comments，含 review thread 的 `resolved` 状态 |
 | `github_ci` | PR 或当前 branch / commit 的 CI / check 状态 |
 | `github_ci_logs` | 指定 run（可选 job）的分页 CI 日志 |
+| `github_ci_annotations` | 单个 CI check run 的 warning/error annotations |
 | `github_issue` | 按编号读取 GitHub issue |
 | `github_issue_comments` | 读取 issue 的对话评论 |
 | `github_releases` | GitHub releases，含 tag、日期与 URL |
@@ -362,7 +368,7 @@ make check
 make integration   # 或:make agent-loop
 ```
 
-该脚本使用 Harness 的真实 Agent Loop、ToolRuntime 和脚本化 LLM adapter，验证 34 个 Tool 的发现、调用和结果返回，不需要真实 LLM 账号。前提是全局安装了 `@deepseek-ai/dsh`(`npm i -g @deepseek-ai/dsh`);脚本会在运行时自动解析包位置，也可以通过 `DSH_GLOBAL_ROOT` 显式指定。测试导入的是编译产物 `lib/`,请始终通过 `npm test` / `make test` 运行测试——直接跑 `node --test` 时,`tests/lib-fresh.test.js` 的守卫会在 `lib/` 过期或缺失时立即报错并给出明确提示。
+该脚本使用 Harness 的真实 Agent Loop、ToolRuntime 和脚本化 LLM adapter，验证 40 个 Tool 的发现、调用和结果返回，不需要真实 LLM 账号。前提是全局安装了 `@deepseek-ai/dsh`(`npm i -g @deepseek-ai/dsh`);脚本会在运行时自动解析包位置，也可以通过 `DSH_GLOBAL_ROOT` 显式指定。测试导入的是编译产物 `lib/`,请始终通过 `npm test` / `make test` 运行测试——直接跑 `node --test` 时,`tests/lib-fresh.test.js` 的守卫会在 `lib/` 过期或缺失时立即报错并给出明确提示。
 
 ### 官方 profile 验证
 

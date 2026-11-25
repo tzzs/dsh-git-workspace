@@ -16,7 +16,7 @@ The plugin started fully **read-only** and is growing mutation support increment
 
 ### Tools
 
-The plugin provides 34 Agent Tools — 22 read-only discovery tools plus 12 write tools — organized by category.
+The plugin provides 40 Agent Tools — 23 read-only discovery tools plus 17 write tools — organized by category.
 
 #### Workspace
 
@@ -54,12 +54,16 @@ Mutation tools over the local repository. Each one returns a structured result a
 | --- | --- |
 | `git_stage` | Stage working-tree files into the index (`paths` or `all:true`) |
 | `git_unstage` | Unstage files while keeping the working-tree changes (`paths` or `all:true`) |
+| `git_stage_hunk` | Stage exactly one hunk of an unstaged tracked file (`path`, `hunk` header fields) |
+| `git_unstage_hunk` | Unstage exactly one staged hunk while keeping its working-tree change |
+| `git_discard_hunk` | Revert exactly one unstaged hunk in the working tree; requires `confirm:true` |
 | `git_commit` | Create a commit on the current branch from staged changes (message required; `amend`/`allowEmpty` optional) |
 | `git_branch_create` | Create a local branch from an optional start point, checked out by default |
 | `git_checkout` | Switch to another branch, or create it first with `create:true`; refuses when local changes would be overwritten |
 | `git_merge` | Merge another branch into the current one; conflicts come back as `conflictedFiles` instead of being resolved automatically |
 | `git_push` | Push a branch to a remote (sets upstream by default); `force:true` rewrites remote history and is never applied automatically |
 | `git_reset` | Move the current branch (`soft`/`mixed`/`hard`); `hard` discards all uncommitted changes and requires explicit `confirm:true` |
+| `git_discard_paths` | Revert tracked changes and remove untracked files under specific paths (scoped `git restore` + `git clean`); requires `confirm:true` |
 
 #### Write (GitHub)
 
@@ -69,6 +73,7 @@ Mutation tools over GitHub via the `gh` CLI. They require an authenticated `gh` 
 | --- | --- |
 | `github_pr_create` | Open a PR for a branch via `gh pr create`; fills title/body from commit history unless both are given |
 | `github_pr_merge` | Merge a PR (`merge`/`squash`/`rebase`), optionally deleting the head branch — irreversible on the remote |
+| `github_pr_close` | Close a PR without merging it |
 | `github_pr_comment` | Post a comment on a PR |
 | `github_pr_review` | Submit a review (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`; requesting changes requires a body) |
 
@@ -82,6 +87,7 @@ Mutation tools over GitHub via the `gh` CLI. They require an authenticated `gh` 
 | `github_pr_comments` | Conversation and inline review comments, including `resolved` state for review threads |
 | `github_ci` | CI/check status for a PR or the current branch/commit |
 | `github_ci_logs` | Paged CI logs for a run (optionally a job) |
+| `github_ci_annotations` | Warning/error annotations for one CI check run |
 | `github_issue` | A GitHub issue by number |
 | `github_issue_comments` | The conversation comments on an issue |
 | `github_releases` | GitHub releases with tag, date, and URL |
@@ -366,7 +372,7 @@ Build output is written to `lib/`. To validate the Agent Loop integration:
 make integration   # or: make agent-loop
 ```
 
-This uses the real Harness Agent Loop and ToolRuntime with a scripted LLM adapter, verifying discovery, invocation, and results for all 34 Tools without a real LLM account. It requires `@deepseek-ai/dsh` installed globally (`npm i -g @deepseek-ai/dsh`); the script resolves the package at runtime, or set `DSH_GLOBAL_ROOT` to its directory explicitly. Tests import compiled output from `lib/`, so always run tests through `npm test`/`make test` — running `node --test` directly against a stale `lib/` fails fast with a clear message thanks to the freshness guard in `tests/lib-fresh.test.js`.
+This uses the real Harness Agent Loop and ToolRuntime with a scripted LLM adapter, verifying discovery, invocation, and results for all 40 Tools without a real LLM account. It requires `@deepseek-ai/dsh` installed globally (`npm i -g @deepseek-ai/dsh`); the script resolves the package at runtime, or set `DSH_GLOBAL_ROOT` to its directory explicitly. Tests import compiled output from `lib/`, so always run tests through `npm test`/`make test` — running `node --test` directly against a stale `lib/` fails fast with a clear message thanks to the freshness guard in `tests/lib-fresh.test.js`.
 
 To verify the plugin in the browser UI, serve it through an isolated local `web` profile:
 

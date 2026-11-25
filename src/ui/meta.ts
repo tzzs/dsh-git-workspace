@@ -68,6 +68,7 @@ export interface FileMeta {
   oldPath: string | null
   status: string
   staged: boolean
+  unstaged?: boolean
   additions?: number
   deletions?: number
   hunks?: HunkMeta[]
@@ -191,6 +192,7 @@ function fileMeta(f: GitFile): FileMeta {
     oldPath: f.oldPath ?? null,
     status: f.status,
     staged: f.staged,
+    ...(typeof f.unstaged === 'boolean' ? { unstaged: f.unstaged } : {}),
   }
   const extra = f as { additions?: unknown; deletions?: unknown; hunks?: Hunk[]; diffOmitted?: DiffOmittedReason }
   if (typeof extra.additions === 'number') {

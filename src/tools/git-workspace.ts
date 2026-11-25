@@ -53,53 +53,44 @@ function isBinaryPatch(chunk: string): boolean {
   return /^Binary files /m.test(chunk) || /^GIT binary patch/m.test(chunk)
 }
 
-async function collectDiffs(root: string): Promise<Map<string, DiffFile>> {
+async function collectDiffMap(root: string, staged: boolean): Promise<Map<string, DiffFile>> {
   const out = new Map<string, DiffFile>()
   try {
-    const [unstaged, staged] = await Promise.all([
-      command('git', ['-c', 'core.quotePath=false', 'diff', '--no-color', '--unified=3'], root).catch(() => null),
-      command('git', ['-c', 'core.quotePath=false', 'diff', '--cached', '--no-color', '--unified=3'], root).catch(() => null),
-    ])
-    for (const run of [unstaged, staged]) {
-      if (!run) continue
-      for (const chunk of run.stdout.split(/^diff --git /m)) {
-        if (!chunk) continue
-        const header = chunk.split('\n')[0] || ''
-        const ms = header.match(/a\/(.*?) b\/(.*)$/)
-        if (!ms) continue
-        const path = ms[2]
-        const renamed = chunk.match(/^rename from (.+)$/m)
-        const copied = chunk.match(/^copy from (.+)$/m)
-        const newFile = /^new file mode/m.test(chunk)
-        const deletedFile = /^deleted file mode/m.test(chunk)
-        const binary = isBinaryPatch(chunk)
-        let status = 'modified'
-        let oldPath: string | null = ms[1]
-        if (renamed) {
-          status = 'renamed'
-          oldPath = renamed[1].trim()
-        } else if (copied) {
-          status = 'copied'
-          oldPath = copied[1].trim()
-        } else if (newFile) {
-          status = 'added'
-          oldPath = null
-        } else if (deletedFile) {
-          status = 'deleted'
-        }
-        const additions = (chunk.match(/^\+(?!\+\+)/gm) || []).length
-        const deletions = (chunk.match(/^-(?!--)/gm) || []).length
-        const existing = out.get(path)
-        const hunks = binary ? [] : parseHunks(chunk)
-        if (existing) {
-          existing.hunks.push(...hunks)
-          existing.additions += additions
-          existing.deletions += deletions
-          if (!existing.oldPath && oldPath) existing.oldPath = oldPath
-        } else {
-          out.set(path, { path, oldPath, status, binary, additions, deletions, hunks })
-        }
+    const run = await command(
+      'git',
+      ['-c', 'core.quotePath=false', 'diff', ...(staged ? ['--cached'] : []), '--no-color', '--unified=3'],
+      root,
+    ).catch(() => null)
+    if (!run) return out
+    for (const chunk of run.stdout.split(/^diff --git /m)) {
+      if (!chunk) continue
+      const header = chunk.split('\n')[0] || ''
+      const ms = header.match(/a\/(.*?) b\/(.*)$/)
+      if (!ms) continue
+      const path = ms[2]
+      const renamed = chunk.match(/^rename from (.+)$/m)
+      const copied = chunk.match(/^copy from (.+)$/m)
+      const newFile = /^new file mode/m.test(chunk)
+      const deletedFile = /^deleted file mode/m.test(chunk)
+      const binary = isBinaryPatch(chunk)
+      let status = 'modified'
+      let oldPath: string | null = ms[1]
+      if (renamed) {
+        status = 'renamed'
+        oldPath = renamed[1].trim()
+      } else if (copied) {
+        status = 'copied'
+        oldPath = copied[1].trim()
+      } else if (newFile) {
+        status = 'added'
+        oldPath = null
+      } else if (deletedFile) {
+        status = 'deleted'
       }
+      const additions = (chunk.match(/^\+(?!\+\+)/gm) || []).length
+      const deletions = (chunk.match(/^-(?!--)/gm) || []).length
+      const hunks = binary ? [] : parseHunks(chunk)
+      out.set(path, { path, oldPath, status, binary, additions, deletions, hunks })
     }
   } catch {
     return out
@@ -140,24 +131,72 @@ async function synthesizeUntracked(root: string, paths: string[]): Promise<DiffF
   return files
 }
 
-function budgetDiffs(files: Iterable<DiffFile>): WorkspaceFile[] {
+interface FileSeed {
+  path: string
+  oldPath: string | null
+  status: GitFile['status']
+  staged: boolean
+  unstaged: boolean
+  additions: number
+  deletions: number
+  diff?: DiffFile
+}
+
+function sideSeed(
+  f: GitFile,
+  side: 'staged' | 'unstaged',
+  diff: DiffFile | undefined,
+  stat: { additions: number; deletions: number } | undefined,
+): FileSeed {
+  const sideStatus = side === 'staged' ? f.indexStatus : f.worktreeStatus
+  return {
+    path: f.path,
+    oldPath: f.oldPath ?? null,
+    status: sideStatus ?? (diff?.status as GitFile['status'] | undefined) ?? f.status,
+    staged: side === 'staged',
+    unstaged: side === 'unstaged',
+    additions: stat?.additions ?? diff?.additions ?? 0,
+    deletions: stat?.deletions ?? diff?.deletions ?? 0,
+    ...(diff ? { diff } : {}),
+  }
+}
+
+function untrackedSeed(f: GitFile, diff: DiffFile | undefined): FileSeed {
+  return {
+    path: f.path,
+    oldPath: null,
+    status: 'untracked',
+    staged: false,
+    unstaged: false,
+    additions: diff?.additions ?? 0,
+    deletions: diff?.deletions ?? 0,
+    ...(diff ? { diff } : {}),
+  }
+}
+
+function budgetEntries(seeds: FileSeed[]): WorkspaceFile[] {
   const out: WorkspaceFile[] = []
   let bytes = 0
-  for (const f of files) {
+  for (const s of seeds) {
     const base: WorkspaceFile = {
-      path: f.path,
-      oldPath: f.oldPath ?? null,
-      status: f.status as GitFile['status'],
-      staged: false,
-      additions: f.additions,
-      deletions: f.deletions,
+      path: s.path,
+      oldPath: s.oldPath,
+      status: s.status,
+      staged: s.staged,
+      unstaged: s.unstaged,
+      additions: s.additions,
+      deletions: s.deletions,
     }
-    if (f.binary) {
-      base.diffOmitted = 'binary'
+    const d = s.diff
+    if (!d) {
       out.push(base)
       continue
     }
-    const hunks = (f.hunks ?? []).slice(0, MAX_INLINE_HUNKS_PER_FILE).map((h) => ({
+    if (d.binary) {
+      out.push({ ...base, diffOmitted: 'binary' })
+      continue
+    }
+    const hunks = (d.hunks ?? []).slice(0, MAX_INLINE_HUNKS_PER_FILE).map((h) => ({
       oldStart: h.oldStart,
       oldLines: h.oldLines,
       newStart: h.newStart,
@@ -167,7 +206,7 @@ function budgetDiffs(files: Iterable<DiffFile>): WorkspaceFile[] {
     const size = hunks.reduce((n, h) => n + h.lines.join('').length + 40, 100)
     if (bytes + size > MAX_INLINE_DIFF_BYTES) continue
     bytes += size
-    out.push({ ...base, hunks })
+    out.push({ ...base, ...(hunks.length ? { hunks } : {}) })
   }
   return out
 }
@@ -407,24 +446,33 @@ export async function gitWorkspace(
         }
       : null
 
-  const [numstat, trackedDiffs] = await Promise.all([fileNumstats(r.root), collectDiffs(r.root)])
+  const [numstat, stagedDiffs, unstagedDiffs] = await Promise.all([
+    fileNumstats(r.root),
+    collectDiffMap(r.root, true),
+    collectDiffMap(r.root, false),
+  ])
   const untrackedPaths = s.files
-    .filter((f) => f.status === 'untracked' && !trackedDiffs.has(f.path))
+    .filter((f) => f.status === 'untracked' && !unstagedDiffs.has(f.path))
     .map((f) => f.path)
   const synthesized = await synthesizeUntracked(r.root, untrackedPaths)
-  for (const u of synthesized) trackedDiffs.set(u.path, u)
-  const inline = budgetDiffs(trackedDiffs.values())
-  const inlineByPath = new Map(inline.map((f) => [f.path, f]))
-  const files: WorkspaceFile[] = s.files.slice(0, 200).map((f) => {
-    const st = f.staged ? (numstat.staged.get(f.path) ?? numstat.unstaged.get(f.path)) : numstat.unstaged.get(f.path)
-    const base: WorkspaceFile = st ? { ...f, additions: st.additions, deletions: st.deletions } : { ...f }
-    const d =
-      inlineByPath.get(f.path) ??
-      (f.oldPath && inlineByPath.has(f.oldPath) ? inlineByPath.get(f.oldPath) : undefined)
-    if (!d || base.hunks || base.diffOmitted) return base
-    if (d.hunks || d.diffOmitted) return { ...base, hunks: d.hunks, diffOmitted: d.diffOmitted }
-    return base
-  })
+  const untrackedDiffs = new Map(synthesized.map((u) => [u.path, u]))
+  const diffFor = (map: Map<string, DiffFile>, f: GitFile) =>
+    map.get(f.path) ?? (f.oldPath ? map.get(f.oldPath) : undefined)
+  const statFor = (map: Map<string, { additions: number; deletions: number }>, f: GitFile) =>
+    map.get(f.path) ?? (f.oldPath ? map.get(f.oldPath) : undefined)
+  const seeds: FileSeed[] = []
+  for (const f of s.files.slice(0, 200)) {
+    if (f.staged) {
+      seeds.push(sideSeed(f, 'staged', diffFor(stagedDiffs, f), statFor(numstat.staged, f)))
+    }
+    if (f.unstaged === true) {
+      seeds.push(sideSeed(f, 'unstaged', diffFor(unstagedDiffs, f), statFor(numstat.unstaged, f)))
+    } else if (f.status === 'untracked') {
+      seeds.push(untrackedSeed(f, untrackedDiffs.get(f.path)))
+    }
+  }
+  const files = budgetEntries(seeds)
+  const diffs = files.filter((f) => (Array.isArray(f.hunks) && f.hunks.length > 0) || f.diffOmitted)
   const additionsTotal = files.reduce((n, f) => n + (f.additions ?? 0), 0)
   const deletionsTotal = files.reduce((n, f) => n + (f.deletions ?? 0), 0)
 
@@ -475,7 +523,7 @@ export async function gitWorkspace(
       recent: !('error' in commits) ? commits.commits : [],
     },
     files,
-    ...(inline.length ? { diffs: inline } : {}),
+    ...(diffs.length ? { diffs } : {}),
     filesTruncated: s.files.length > 200,
     branches:
       !('error' in branches)

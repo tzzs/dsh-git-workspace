@@ -20,9 +20,14 @@ declare module '@deepseek-ai/dsh-session/types' {
 interface ProjectionUnit {
   key: string
   schema: { parse(value: unknown): unknown }
+  stateSchema: { parse(value: unknown): unknown }
   init(): unknown
   apply(state: unknown, event: { type: string; data?: unknown }): unknown
   view(state: unknown): unknown
+  wire: {
+    viewSchema: { parse(value: unknown): unknown }
+    view(state: unknown): unknown
+  }
   stateVersion: number
 }
 
@@ -32,19 +37,24 @@ function isWorkspaceSample(v: unknown): v is WorkspaceSample {
   return typeof v === 'object' && v !== null
 }
 
+function parseSample(value: unknown): unknown {
+  if (value === null || value === undefined) return null
+  if (!isWorkspaceSample(value)) throw new Error('invalid git workspace projection value')
+  return value
+}
+
 const unit: ProjectionUnit = {
   key: WORKSPACE_PROJECTION_KEY,
-  schema: {
-    parse(value) {
-      if (value === null || value === undefined) return null
-      if (!isWorkspaceSample(value)) throw new Error('invalid git workspace projection value')
-      return value
-    },
-  },
+  schema: { parse: parseSample },
+  stateSchema: { parse: parseSample },
   init: () => null,
   apply: (state, event) =>
     event.type === WORKSPACE_EVENT && isWorkspaceSample(event.data) ? event.data : state,
   view: (state) => state,
+  wire: {
+    viewSchema: { parse: parseSample },
+    view: (state) => state,
+  },
   stateVersion: 1,
 }
 

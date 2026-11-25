@@ -4,10 +4,12 @@ import {
   Tooltip,
   StateDot,
   writeClipboard,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+import {
   IconCheckOutline14,
   IconCopyOutline16,
   IconChevronRightOutline14,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from './icons.js'
 
 const S = {
   card: {
@@ -123,6 +125,24 @@ export const STYLE_SHEET = [
   '.dgw-diff-splitcol{flex:1 1 0;min-width:0;overflow-x:auto}',
   '.dgw-diff-splitcol+.dgw-diff-splitcol{border-left:1px solid var(--dsw-alias-border-l1)}',
   '.dgw-diff-split-empty{background:var(--dsw-alias-bg-layer-2)}',
+  '.dgw-statusbar{display:flex;align-items:center;gap:8px;padding:9px 2px 8px;flex:none;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}',
+  '.dgw-syncbtn{width:auto;height:22px;padding:0 8px;border-radius:6px;font-size:11px;gap:4px}',
+  '.dgw-grouphd{display:flex;align-items:center;gap:6px;padding:5px 2px 3px;cursor:pointer}',
+  '.dgw-groupactions{display:inline-flex;align-items:center;gap:4px;flex:none}',
+  '.dgw-minibtn{height:20px;padding:0 7px;border:1px solid var(--dsw-alias-border-l1);border-radius:5px;background:none;color:var(--dsw-alias-label-secondary);font:10.5px var(--dsw-font-family);cursor:pointer}',
+  '.dgw-minibtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+  '.dgw-minibtn:disabled{opacity:.45;cursor:default}',
+  '.dgw-inline-diff{margin:3px 0 7px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:9px;overflow:hidden;background:var(--dsw-alias-bg-base);max-height:420px}',
+  '.dgw-inline-diff .dgw-diff{flex:none}',
+  '.dgw-inline-diff .dgw-diff-body{max-height:360px}',
+  '.dgw-diff-hunkhead{display:flex;align-items:center;gap:8px;justify-content:space-between}',
+  '.dgw-hunkactions{display:inline-flex;align-items:center;gap:3px;flex:none}',
+  '.dgw-hunkbtn{height:18px;padding:0 6px;border:1px solid var(--dsw-alias-border-l1);border-radius:5px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);font:10px var(--dsw-font-family);cursor:pointer;white-space:nowrap}',
+  '.dgw-hunkbtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+  '.dgw-confirm-armed{color:var(--dsw-alias-state-error-primary)!important;border-color:var(--dsw-alias-state-error-primary)!important;font-weight:600}',
+  '.dgw-commitbar{flex:none;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);padding:8px 2px 10px;display:flex;flex-direction:column;gap:6px}',
+  '.dgw-changeshead{display:flex;align-items:center;gap:6px;padding:7px 2px 6px;flex:none}',
+  '.dgw-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}',
   '.dgw-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:24px;z-index:1200}',
   '.dgw-modal{width:100%;max-width:860px;max-height:calc(100vh - 48px);display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden}',
 ].join('\n')
@@ -339,6 +359,52 @@ export function IconBtn({ label, onClick, side = 'bottom', children }) {
       { type: 'button', className: 'dgw-iconbtn', onClick, 'aria-label': label },
       children,
     ),
+  )
+}
+
+export function ConfirmButton({
+  label,
+  confirmLabel,
+  onConfirm,
+  className = 'dgw-stagebtn',
+  style,
+  children,
+  confirmChildren,
+}) {
+  const armedRef = React.useRef(false)
+  const [armed, setArmed] = React.useState(false)
+  const title = armed ? confirmLabel : label
+  return React.createElement(
+    'button',
+    {
+      type: 'button',
+      className: `${className}${armed ? ' dgw-confirm-armed' : ''}`,
+      title,
+      'aria-label': title,
+      style,
+      onClick: (e) => {
+        if (e) e.stopPropagation()
+        if (armedRef.current) {
+          armedRef.current = false
+          setArmed(false)
+          onConfirm()
+        } else {
+          armedRef.current = true
+          setArmed(true)
+        }
+      },
+      onBlur: () => {
+        armedRef.current = false
+        setArmed(false)
+      },
+    },
+    armed
+      ? confirmChildren !== undefined
+        ? confirmChildren
+        : confirmLabel
+      : children !== undefined
+        ? children
+        : label,
   )
 }
 

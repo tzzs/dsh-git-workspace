@@ -110,6 +110,7 @@ test('client registers a toolview for every Git/GitHub tool', () => {
     'github_pr', 'github_pr_create', 'github_ci', 'git_files', 'git_compare', 'git_blame',
     'git_branches', 'git_remotes', 'git_worktrees', 'git_stash', 'git_tags',
     'git_stage', 'git_unstage', 'git_commit', 'git_branch_create', 'git_push', 'git_checkout', 'git_merge', 'git_reset',
+    'git_discard_paths', 'git_stage_hunk', 'git_unstage_hunk', 'git_discard_hunk',
     'github_pr_diff', 'github_pr_reviews', 'github_pr_comments',
     'github_ci_logs', 'github_issue', 'github_issue_comments', 'github_releases',
     'github_pr_merge', 'github_pr_comment', 'github_pr_review',
@@ -634,7 +635,7 @@ test('projection error falls back to usable tool-result data', () => {
 // Stateful React mock: hooks live in per-component-instance buckets refilled
 // left-to-right on every execution of that component, so setState + re-render
 // cycles behave predictably without a real React reconciler.
-function interactiveHeader(conversation, { ctxExtras = {}, compProps = {} } = {}) {
+function interactiveHeader(conversation, { ctxExtras = {}, compProps = {}, externals } = {}) {
   const store = new Map()
   let current = null
   const ReactStateful = {
@@ -687,7 +688,7 @@ function interactiveHeader(conversation, { ctxExtras = {}, compProps = {} } = {}
       current = prev
     }
   }
-  const { plugin } = loadBundle(ReactStateful)
+  const { plugin } = loadBundle(ReactStateful, externals)
   const { registrations } = collectRegistrations(plugin, ctxExtras)
   const comp = registrations.find((r) => r.def.id === 'git-workspace').comp
   const props = { useSession: (sel) => sel(conversation), sessionId: 's1', ...compProps }
@@ -719,7 +720,7 @@ function interactiveHeader(conversation, { ctxExtras = {}, compProps = {} } = {}
         dropdownMenu = dropdownPortal && dropdownPortal.el ? dropdownPortal.el : null
       }
     }
-    return { tree, drawerEl, body, diffModal, dropdownMenu }
+    return { tree, drawerEl, body, diffModal, dropdownMenu, renderEl: (el) => runComponent(el.type, el.props) }
   }
   const walk = (node, fn, depth = 0) => {
     if (depth > 60 || node === null || node === undefined || typeof node !== 'object') return
@@ -751,7 +752,7 @@ function interactiveHeader(conversation, { ctxExtras = {}, compProps = {} } = {}
     })
     return out
   }
-  return { render, walk, findEls }
+  return { render, walk, findEls, renderEl: (el) => runComponent(el.type, el.props) }
 }
 
 function ownText(el) {
@@ -815,55 +816,53 @@ const DIFF_CONVERSATION = {
   ],
 }
 
-test('clicking a file row opens its diff in a shared popup, closable again', () => {
+test('clicking a file row opens its diff inline in the same panel, closable again', () => {
   const ui = interactiveHeader(DIFF_CONVERSATION)
-  let { body, diffModal } = ui.render()
-  assert.equal(diffModal, null, 'no diff popup while every row is untouched')
+  let { body } = ui.render()
+  assert.equal(ui.findEls(body, (el) => el.props && el.props['data-git-workspace-diff'] === '').length, 0, 'no diff while every row is untouched')
   const fileRow = ui.findEls(body, (el) => el.props && String(el.props.className || '').includes('dgw-filebtn')).find((el) => ownText(el).includes('a.ts'))
   assert.ok(fileRow, 'patch-backed file row is interactive')
   assert.equal(fileRow.props['aria-pressed'], false, 'row starts unselected')
   fileRow.props.onClick()
-  ;({ body, diffModal } = ui.render())
-  assert.ok(diffModal, 'the diff popup opens for the clicked file')
-  const diffs = ui.findEls(diffModal, (el) => el.props && el.props['data-git-workspace-diff'] === '')
-  assert.equal(diffs.length, 1, 'the popup renders the diff viewer for the clicked file')
+  ;({ body } = ui.render())
+  const diffs = ui.findEls(body, (el) => el.props && el.props['data-git-workspace-diff'] === '')
+  assert.equal(diffs.length, 1, 'the same panel renders the diff for the clicked file')
   const text = collectText(diffs[0]).join('\n')
   assert.ok(text.includes('@@ -1,3 +1,4 @@'), 'hunk header renders')
   assert.ok(text.includes('context') && text.includes('old line') && text.includes('new line 2'), 'diff lines render')
-  // The close action is an IconBtn wrapping the host Tooltip primitive.
   const closeTip = ui.findEls(diffs[0], (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === 'Close diff')[0]
   assert.ok(closeTip, 'viewer exposes a close action')
   const innerToggle = Array.isArray(closeTip.props.children) ? closeTip.props.children[0] : closeTip.props.children
   innerToggle.props.onClick()
-  ;({ diffModal } = ui.render())
-  assert.equal(diffModal, null, 'the diff popup closes on demand')
+  ;({ body } = ui.render())
+  assert.equal(ui.findEls(body, (el) => el.props && el.props['data-git-workspace-diff'] === '').length, 0, 'the inline diff closes on demand')
 })
 
-test('the diff popup toggles between unified and left/right split, pairing removed and added lines', () => {
+test('the inline diff toggles between unified and left/right split, pairing removed and added lines', () => {
   const ui = interactiveHeader(DIFF_CONVERSATION)
-  let { body, diffModal } = ui.render()
+  let { body } = ui.render()
   const fileRow = ui.findEls(body, (el) => el.props && String(el.props.className || '').includes('dgw-filebtn')).find((el) => ownText(el).includes('a.ts'))
   fileRow.props.onClick()
-  ;({ diffModal } = ui.render())
-  const diff = ui.findEls(diffModal, (el) => el.props && el.props['data-git-workspace-diff'] === '')[0]
+  ;({ body } = ui.render())
+  let diff = ui.findEls(body, (el) => el.props && el.props['data-git-workspace-diff'] === '')[0]
   assert.equal(ui.findEls(diff, (el) => String(el.props && el.props.className) === 'dgw-diff-splitpane').length, 0, 'starts in unified view')
 
   const splitToggle = ui.findEls(diff, (el) => el.props && el.props.title === 'Split view')[0]
   assert.ok(splitToggle, 'a Split option is offered')
   splitToggle.props.onClick()
-  ;({ diffModal } = ui.render())
-  const split = ui.findEls(diffModal, (el) => el.props && el.props['data-git-workspace-diff'] === '')[0]
-  const cols = ui.findEls(split, (el) => String(el.props && el.props.className) === 'dgw-diff-splitcol')
+  ;({ body } = ui.render())
+  diff = ui.findEls(body, (el) => el.props && el.props['data-git-workspace-diff'] === '')[0]
+  const cols = ui.findEls(diff, (el) => String(el.props && el.props.className) === 'dgw-diff-splitcol')
   assert.equal(cols.length, 2, 'split view renders two columns')
   const [left, right] = cols.map((col) => collectText(col).join('\n'))
   assert.ok(left.includes('old line') && !left.includes('new line'), 'left column only carries the removed line')
   assert.ok(right.includes('new line') && right.includes('new line 2') && !right.includes('old line'), 'right column only carries the added lines')
   assert.ok(left.includes('context') && right.includes('context'), 'context lines mirror onto both columns')
 
-  const unifiedToggle = ui.findEls(split, (el) => el.props && el.props.title === 'Unified view')[0]
+  const unifiedToggle = ui.findEls(diff, (el) => el.props && el.props.title === 'Unified view')[0]
   unifiedToggle.props.onClick()
-  ;({ diffModal } = ui.render())
-  const backToUnified = ui.findEls(diffModal, (el) => el.props && el.props['data-git-workspace-diff'] === '')[0]
+  ;({ body } = ui.render())
+  const backToUnified = ui.findEls(body, (el) => el.props && el.props['data-git-workspace-diff'] === '')[0]
   assert.equal(
     ui.findEls(backToUnified, (el) => String(el.props && el.props.className) === 'dgw-diff-splitpane').length,
     0,
@@ -882,7 +881,7 @@ test('rows without patch data stay inert; omitted diffs offer a native diff CTA'
       },
     },
   })
-  let { body, diffModal } = ui.render()
+  let { body } = ui.render()
   const plainRows = ui.findEls(body, (el) => {
     const cls = el.props && el.props.className
     return cls && String(cls).includes('dgw-row') && !String(cls).includes('dgw-dirbtn') && !String(cls).includes('dgw-filebtn') && ownText(el).includes('no-hunks.ts')
@@ -891,10 +890,9 @@ test('rows without patch data stay inert; omitted diffs offer a native diff CTA'
   const binRow = ui.findEls(body, (el) => el.props && String(el.props.className || '').includes('dgw-filebtn')).find((el) => ownText(el).includes('huge.bin'))
   assert.ok(binRow, 'omitted-diff row is interactive')
   binRow.props.onClick()
-  ;({ diffModal } = ui.render())
-  assert.ok(diffModal, 'the popup opens for the omitted-diff row')
-  const askBtns = ui.findEls(diffModal, (el) => ((el.type && el.type.stubName === 'Button') || el.type === 'button') && ownText(el).includes('Fetch full diff'))
-  assert.equal(askBtns.length, 1, 'the opened binary omission shows one fetch-full-diff CTA')
+  ;({ body } = ui.render())
+  const askBtns = ui.findEls(body, (el) => ((el.type && el.type.stubName === 'Button') || el.type === 'button') && ownText(el).includes('Fetch full diff'))
+  assert.equal(askBtns.length, 1, 'the inline binary omission shows one fetch-full-diff CTA')
   const askBtn = askBtns[0]
   await askBtn.props.onClick()
   assert.deepEqual(mock.commands, ['/git-diff {"path":"huge.bin"}'], 'the CTA dispatches the native git-diff command')
@@ -915,7 +913,7 @@ test('stage-all dispatches its native write command and does not prompt', async 
   const stageAll = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Stage all')[0]
   assert.ok(stageAll, 'Stage all button renders')
   await stageAll.props.onClick()
-  assert.deepEqual(mock.commands, ['/git-stage {"all":true}'])
+  assert.deepEqual(mock.commands, ['/git-stage {"all":true}', '/git-refresh {}'])
   assert.deepEqual(mock.prompts, [])
 })
 
@@ -963,7 +961,7 @@ test('a folder row\'s hover control stages every file under it in one dispatch, 
   assert.ok(stageDirTip, 'unstaged folder shows a stage-all-in-folder control')
   const stageDirBtn = Array.isArray(stageDirTip.props.children) ? stageDirTip.props.children[0] : stageDirTip.props.children
   await stageDirBtn.props.onClick()
-  assert.deepEqual(mock.commands, ['/git-stage {"paths":["src/a.ts","src/b.ts"]}'], 'stages every file under the folder in one dispatch')
+  assert.deepEqual(mock.commands, ['/git-stage {"paths":["src/a.ts","src/b.ts"]}', '/git-refresh {}'], 'stages every file under the folder in one dispatch')
 })
 
 test('the Graph section\'s view menu renders as a portal, toggles to the other mode, and folds refresh in', async () => {
@@ -1054,19 +1052,29 @@ test('the discard hover controls dispatch git-discard-paths scoped to the folder
       },
     },
   })
-  const { body } = ui.render()
-  const findBtn = (label) => {
+  let { body } = ui.render()
+  const findConfirm = (label) => {
     const tip = ui.findEls(body, (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === label)[0]
     assert.ok(tip, `${label} control renders`)
-    return Array.isArray(tip.props.children) ? tip.props.children[0] : tip.props.children
+    const child = Array.isArray(tip.props.children) ? tip.props.children[0] : tip.props.children
+    assert.equal(typeof child.type, 'function', `${label} renders a confirm button`)
+    return ui.renderEl(child)
   }
-  await findBtn('Discard folder').props.onClick()
-  await findBtn('Discard changes to this file').props.onClick()
+  const confirm = async (label) => {
+    findConfirm(label).props.onClick()
+    ;({ body } = ui.render())
+    findConfirm(label).props.onClick()
+    await flush()
+  }
+  await confirm('Discard folder')
+  await confirm('Discard changes to this file')
   assert.deepEqual(
     mock.commands,
     [
       '/git-discard-paths {"paths":["src/a.ts","src/b.ts"]}',
+      '/git-refresh {}',
       '/git-discard-paths {"paths":["src/a.ts"]}',
+      '/git-refresh {}',
     ],
     'the folder control discards every file under it, the file control only its own path',
   )
@@ -1115,7 +1123,7 @@ test('a fully staged file or folder offers only Unstage on hover — no Discard,
   const unstageTip = ui.findEls(body, (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === 'Unstage folder')[0]
   const unstageBtn = Array.isArray(unstageTip.props.children) ? unstageTip.props.children[0] : unstageTip.props.children
   await unstageBtn.props.onClick()
-  assert.deepEqual(mock.commands, ['/git-unstage {"paths":["src/a.ts","src/b.ts"]}'], 'unstaging the folder targets every staged file under it')
+  assert.deepEqual(mock.commands, ['/git-unstage {"paths":["src/a.ts","src/b.ts"]}', '/git-refresh {}'], 'unstaging the folder targets every staged file under it')
 })
 
 test('an untracked directory reported by git as a single "dir/" entry renders as one row, not a nameless child', () => {
@@ -1177,6 +1185,14 @@ test('an unmatched native command disables the whole panel with an explicit hint
     ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Stage all').length,
     0,
     'write controls disappear once native commands are known unsupported',
+  )
+  const fileRow = ui.findEls(body, (el) => el.props && String(el.props.className || '').includes('dgw-filebtn')).find((el) => ownText(el).includes('a.ts'))
+  fileRow.props.onClick()
+  ;({ body } = ui.render())
+  assert.equal(
+    ui.findEls(body, (el) => el.type === 'button' && /^(Stage|Unstage|Discard) hunk$/.test(ownText(el))).length,
+    0,
+    'hunk controls disappear with the rest of the write actions',
   )
   assert.deepEqual(mock.prompts, [], 'no chat fallback is ever used, even once native support is ruled out')
 })
@@ -1331,14 +1347,10 @@ test('Create PR empty state dispatches the native github PR command with explici
     },
   })
   let { body } = ui.render()
-  const prTabBtn = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Pull Request'))[0]
-  assert.ok(prTabBtn, 'PR tab button renders')
-  prTabBtn.props.onClick()
-  ;({ body } = ui.render())
   const createBtns = ui.findEls(body, (el) => el.type === 'button' && String(el.props.className || '').includes('dgw-createpr'))
   assert.equal(createBtns.length, 1, 'Create PR button renders in the empty PR tab')
   await createBtns[0].props.onClick()
-  assert.equal(mock.commands.length, 1, 'create PR dispatches one native command; projection sampling refreshes automatically')
+  assert.deepEqual(mock.commands.filter((line) => line === '/git-refresh {}').length, 1, 'create PR refreshes the sample after opening')
   const createLine = mock.commands.find((line) => typeof line === "string" && line.startsWith("/git-pr-create "))
   const create = JSON.parse(createLine.slice("/git-pr-create ".length))
   assert.equal(create.head, 'feature/x')
@@ -1377,7 +1389,11 @@ test('commit row dispatches the native git-show command for its diff', async () 
       },
     },
   })
-  const { body } = ui.render()
+  let { body } = ui.render()
+  const graphHeader = ui.findEls(body, (el) => el.type === 'button' && ownText(el).startsWith('Graph'))[0]
+  assert.ok(graphHeader, 'Graph section header renders')
+  graphHeader.props.onClick()
+  ;({ body } = ui.render())
   const viewBtn = ui.findEls(body, (el) => el.type === 'button' && el.props.title === 'View this commit’s diff')[0]
   assert.ok(viewBtn, 'commit row renders a view-diff control')
   await viewBtn.props.onClick()
@@ -1421,9 +1437,6 @@ test('a failing CI check offers a native log-fetch CTA; passing checks do not', 
     },
   })
   let { body } = ui.render()
-  const prTabBtn = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Pull Request'))[0]
-  prTabBtn.props.onClick()
-  ;({ body } = ui.render())
   const logBtns = ui.findEls(body, (el) => el.type === 'button' && el.props.title === 'Fetch failure logs')
   assert.equal(logBtns.length, 1, 'only the failing check offers a log CTA')
   await logBtns[0].props.onClick()
@@ -1461,9 +1474,6 @@ test('the PR header offers a native full-diff fetch CTA', async () => {
     },
   })
   let { body } = ui.render()
-  const prTabBtn = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Pull Request'))[0]
-  prTabBtn.props.onClick()
-  ;({ body } = ui.render())
   const diffBtn = ui.findEls(body, (el) => el.type === 'button' && el.props.title === 'Fetch the full pull request diff')[0]
   assert.ok(diffBtn, 'PR header renders a full-diff fetch control')
   await diffBtn.props.onClick()
@@ -1514,9 +1524,6 @@ test('expanding a check row reveals Status/Started/Completed, workflow/check ids
     },
   })
   let { body } = ui.render()
-  const prTabBtn = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Pull Request'))[0]
-  prTabBtn.props.onClick()
-  ;({ body } = ui.render())
 
   const row = ui.findEls(body, (el) => el.props && el.props.role === 'button' && el.props.className === 'dgw-row' && ownText(el).includes('test (24)'))[0]
   assert.ok(row, 'the check renders as an expandable row')
@@ -1583,9 +1590,6 @@ test('the merge split button merges with the default method; the chevron menu sw
     },
   })
   let { body } = ui.render()
-  const prTabBtn = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Pull Request'))[0]
-  prTabBtn.props.onClick()
-  ;({ body } = ui.render())
 
   const mergeBtn = ui.findEls(body, (el) => el.type === 'button' && el.props.title === 'Merge this pull request with the selected method')[0]
   assert.equal(ownText(mergeBtn), 'Squash and merge', 'squash is the default method')
@@ -1607,9 +1611,13 @@ test('the merge split button merges with the default method; the chevron menu sw
   const menuBtn2 = ui.findEls(body, (el) => el.type === 'button' && el.props['aria-label'] === 'Choose merge method, or close this pull request')[0]
   menuBtn2.props.onClick()
   ;({ body } = ui.render())
-  const closeItem = ui.findEls(body, (el) => el.props && el.props.role === 'button' && ownText(el).includes('Close pull request'))[0]
+  const closeItem = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Close pull request'))[0]
   assert.ok(closeItem, 'the dropdown offers Close pull request')
   closeItem.props.onClick()
+  ;({ body } = ui.render())
+  const confirmClose = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Confirm close pull request'))[0]
+  assert.ok(confirmClose, 'closing the PR is a two-step destructive action')
+  confirmClose.props.onClick()
   await flush()
   assert.deepEqual(mock.commands, [
     '/git-pr-merge {"number":7,"method":"squash"}',
@@ -1782,6 +1790,10 @@ test('commit row expands to show author/date/sha on click; the diff button does 
     },
   })
   let { body } = ui.render()
+  const graphHeader = ui.findEls(body, (el) => el.type === 'button' && ownText(el).startsWith('Graph'))[0]
+  assert.ok(graphHeader, 'Graph section header renders')
+  graphHeader.props.onClick()
+  ;({ body } = ui.render())
   const toggles = ui.findEls(body, (el) => el.props && el.props.title === 'Toggle commit details')
   assert.equal(toggles.length, 2, 'both commit rows render a toggle')
 
@@ -1841,6 +1853,9 @@ test('the graph pins the PR base branch at the comparison boundary and fills a r
   }
   const ui = interactiveHeader(conversation)
   let { body } = ui.render()
+  const graphHeader = ui.findEls(body, (el) => el.type === 'button' && ownText(el).startsWith('Graph'))[0]
+  graphHeader.props.onClick()
+  ;({ body } = ui.render())
 
   assert.ok(
     ui.findEls(body, (el) => el.type === 'span' && ownText(el) === 'main').length > 0,
@@ -1892,7 +1907,10 @@ test('"Committed on branch" names the actual comparison base instead of a generi
     ],
   }
   const ui = interactiveHeader(conversation)
-  const { body } = ui.render()
+  let { body } = ui.render()
+  const committedHeader = ui.findEls(body, (el) => el.type === 'button' && ownText(el).startsWith('Committed on branch'))[0]
+  committedHeader.props.onClick()
+  ;({ body } = ui.render())
   assert.ok(
     ui.findEls(body, (el) => el.type === 'span' && ownText(el).includes('No commits ahead of master')).length > 0,
     'names the real comparison base branch',
@@ -1902,4 +1920,439 @@ test('"Committed on branch" names the actual comparison base instead of a generi
     0,
     'no longer uses the generic, potentially-wrong "upstream branch" wording',
   )
+})
+
+function stagedConversation() {
+  return {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo', remote: 'https://github.com/o/r.git' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 2, behind: 1 },
+          changes: { modified: 0, staged: 1, deleted: 0, renamed: 0, untracked: 0 },
+          clean: false,
+          pullRequest: null,
+          ci: null,
+          files: [
+            {
+              path: 'src/a.ts',
+              oldPath: null,
+              status: 'modified',
+              staged: true,
+              unstaged: false,
+              additions: 2,
+              deletions: 0,
+              hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 3, lines: ['-old', '+new', '+new 2'] }],
+            },
+          ],
+        },
+      },
+    ],
+  }
+}
+
+function withSessions(mock) {
+  return {
+    get(name) {
+      if (name !== 'sessions') return undefined
+      return { binding: () => ({ session: mock.session }) }
+    },
+  }
+}
+
+test('status bar shows branch state and dispatches fetch, pull, and push', async () => {
+  const mock = sessionMock()
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo', remote: 'https://github.com/o/r.git' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 2, behind: 1 },
+          changes: { modified: 1, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: false,
+          pullRequest: null,
+          ci: null,
+          files: [{ path: 'a.ts', oldPath: null, status: 'modified', staged: false }],
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation, { ctxExtras: withSessions(mock) })
+  const { body } = ui.render()
+  const hasText = (s) => ui.findEls(body, (el) => ownText(el).includes(s)).length > 0
+  assert.ok(hasText('feature/x'), 'branch renders')
+  assert.ok(hasText('↑2') && hasText('↓1'), 'ahead/behind counters render')
+  assert.ok(hasText('1 change'), 'dirty state renders')
+  const btn = (label) => ui.findEls(body, (el) => el.type === 'button' && ownText(el) === label)[0]
+  assert.ok(btn('Fetch') && btn('Pull') && btn('Push'), 'sync actions render')
+  await btn('Fetch').props.onClick()
+  await flush()
+  await btn('Pull').props.onClick()
+  await flush()
+  await btn('Push').props.onClick()
+  await flush()
+  assert.deepEqual(mock.commands, [
+    '/git-fetch {}',
+    '/git-refresh {}',
+    '/git-pull {}',
+    '/git-refresh {}',
+    '/git-push {}',
+    '/git-refresh {}',
+  ])
+})
+
+test('changes are grouped into staged, unstaged, and untracked trees', () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 2, staged: 1, deleted: 0, renamed: 0, untracked: 1 },
+          clean: false,
+          pullRequest: null,
+          ci: null,
+          files: [
+            { path: 'src/a.ts', oldPath: null, status: 'modified', staged: true, unstaged: false },
+            { path: 'src/a.ts', oldPath: null, status: 'modified', staged: false, unstaged: true },
+            { path: 'src/b.ts', oldPath: null, status: 'modified', staged: false, unstaged: true },
+            { path: 'new.ts', oldPath: null, status: 'untracked', staged: false, unstaged: false },
+          ],
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation)
+  let { body } = ui.render()
+  const group = (title) => ui.findEls(body, (el) => el.props && String(el.props.className || '').includes('dgw-grouphd') && ownText(el).startsWith(title))[0]
+  assert.ok(group('Staged'), 'staged group renders')
+  assert.ok(group('Unstaged'), 'unstaged group renders')
+  assert.ok(group('Untracked'), 'untracked group renders')
+  const rowCount = () => ui.findEls(body, (el) => {
+    const cls = String((el.props && el.props.className) || '')
+    return el.type === 'div' && cls.includes('dgw-row') && !cls.includes('dgw-dirbtn') && ownText(el).includes('a.ts')
+  }).length
+  assert.equal(rowCount(), 2, 'a partially staged file appears in both groups')
+  group('Staged').props.onClick()
+  ;({ body } = ui.render())
+  assert.equal(rowCount(), 1, 'collapsing the staged group hides its entry')
+  assert.ok(ui.findEls(body, (el) => {
+    const cls = String((el.props && el.props.className) || '')
+    return el.type === 'div' && cls.includes('dgw-row') && !cls.includes('dgw-dirbtn') && ownText(el).includes('new.ts')
+  }).length === 1, 'untracked file stays in its own group')
+})
+
+test('the commit bar stays disabled until a message and staged content exist, then commits and clears', async () => {
+  const mock = sessionMock()
+  const ui = interactiveHeader(stagedConversation(), { ctxExtras: withSessions(mock) })
+  let { body } = ui.render()
+  const button = () => ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Commit 1 staged'))[0]
+  const textarea = () => ui.findEls(body, (el) => el.type === 'textarea' && el.props['aria-label'] === 'Commit message')[0]
+  assert.equal(button().props.disabled, true, 'disabled while the message is empty')
+  textarea().props.onChange({ target: { value: 'feat: flow' } })
+  ;({ body } = ui.render())
+  assert.equal(button().props.disabled, false, 'enabled with a message and staged content')
+  await button().props.onClick()
+  await flush()
+  assert.deepEqual(mock.commands, ['/git-commit {"message":"feat: flow"}', '/git-refresh {}'])
+  ;({ body } = ui.render())
+  assert.equal(textarea().props.value, '', 'successful commit clears the draft')
+  assert.deepEqual(mock.prompts, [])
+})
+
+test('a failed commit keeps the draft and never falls back to chat', async () => {
+  const mock = sessionMock({ failCommand: true })
+  const ui = interactiveHeader(stagedConversation(), { ctxExtras: withSessions(mock) })
+  let { body } = ui.render()
+  const textarea = () => ui.findEls(body, (el) => el.type === 'textarea' && el.props['aria-label'] === 'Commit message')[0]
+  textarea().props.onChange({ target: { value: 'feat: keep me' } })
+  ;({ body } = ui.render())
+  const button = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Commit 1 staged'))[0]
+  await button.props.onClick()
+  await flush()
+  ;({ body } = ui.render())
+  assert.equal(textarea().props.value, 'feat: keep me', 'failed commit keeps the draft')
+  assert.deepEqual(mock.prompts, [])
+})
+
+test('the commit bar disables itself when nothing is staged', () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 1, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: false,
+          pullRequest: null,
+          ci: null,
+          files: [{ path: 'a.ts', oldPath: null, status: 'modified', staged: false }],
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation, { ctxExtras: withSessions(sessionMock()) })
+  let { body } = ui.render()
+  const textarea = ui.findEls(body, (el) => el.type === 'textarea' && el.props['aria-label'] === 'Commit message')[0]
+  textarea.props.onChange({ target: { value: 'only a message' } })
+  ;({ body } = ui.render())
+  const button = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Commit')[0]
+  assert.ok(button, 'commit button renders')
+  assert.equal(button.props.disabled, true, 'no staged content means no commit')
+  assert.ok(ui.findEls(body, (el) => ownText(el).includes('Nothing staged')).length > 0)
+})
+
+test('hunk actions stage, unstage, and confirm-discard exact hunks', async () => {
+  const mock = sessionMock()
+  const ui = interactiveHeader(DIFF_CONVERSATION, { ctxExtras: withSessions(mock) })
+  let { body } = ui.render()
+  const row = ui.findEls(body, (el) => el.props && String(el.props.className || '').includes('dgw-filebtn')).find((el) => ownText(el).includes('a.ts'))
+  row.props.onClick()
+  ;({ body } = ui.render())
+  const stage = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Stage hunk')[0]
+  assert.ok(stage, 'staged hunk action renders')
+  stage.props.onClick()
+  await flush()
+  assert.deepEqual(mock.commands, [
+    '/git-stage-hunk {"path":"src/a.ts","side":"unstaged","hunk":{"oldStart":1,"oldLines":3,"newStart":1,"newLines":4}}',
+    '/git-refresh {}',
+  ])
+  const discard = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Discard hunk')[0]
+  discard.props.onClick()
+  ;({ body } = ui.render())
+  const confirm = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Confirm discard')[0]
+  assert.ok(confirm, 'discard hunk is a two-step action')
+  confirm.props.onClick()
+  await flush()
+  assert.deepEqual(mock.commands.slice(2), [
+    '/git-discard-hunk {"path":"src/a.ts","side":"unstaged","hunk":{"oldStart":1,"oldLines":3,"newStart":1,"newLines":4},"confirm":true}',
+    '/git-refresh {}',
+  ])
+
+  const stagedMock = sessionMock()
+  const stagedUi = interactiveHeader(stagedConversation(), { ctxExtras: withSessions(stagedMock) })
+  let stagedBody = stagedUi.render().body
+  const stagedRow = stagedUi.findEls(stagedBody, (el) => el.props && String(el.props.className || '').includes('dgw-filebtn')).find((el) => ownText(el).includes('a.ts'))
+  stagedRow.props.onClick()
+  stagedBody = stagedUi.render().body
+  const unstage = stagedUi.findEls(stagedBody, (el) => el.type === 'button' && ownText(el) === 'Unstage hunk')[0]
+  assert.ok(unstage, 'staged hunks offer Unstage hunk')
+  unstage.props.onClick()
+  await flush()
+  assert.deepEqual(stagedMock.commands, [
+    '/git-unstage-hunk {"path":"src/a.ts","side":"staged","hunk":{"oldStart":1,"oldLines":1,"newStart":1,"newLines":3}}',
+    '/git-refresh {}',
+  ])
+})
+
+test('panel UI state persists selection, diff mode, group and directory state, and the draft', () => {
+  const saved = new Map()
+  const previous = globalThis.localStorage
+  globalThis.localStorage = {
+    getItem: (key) => (saved.has(key) ? saved.get(key) : null),
+    setItem: (key, value) => saved.set(key, String(value)),
+  }
+  const key = 'dsh-git-workspace.ui:repo:feature/x'
+  saved.set(key, JSON.stringify({
+    diffMode: 'split',
+    selectedKey: 'unstaged:unstaged:src/a.ts',
+    groupOpen: { staged: true, unstaged: true, untracked: true },
+    commitDraft: 'persisted draft',
+    dirOpen: {},
+  }))
+  try {
+    const ui = interactiveHeader(DIFF_CONVERSATION)
+    let { body } = ui.render()
+    const diff = ui.findEls(body, (el) => el.props && el.props['data-git-workspace-diff'] === '')[0]
+    assert.ok(diff, 'the selected file reopens its inline diff')
+    assert.equal(ui.findEls(diff, (el) => String(el.props && el.props.className) === 'dgw-diff-splitcol').length, 2, 'split mode restores')
+    const textarea = ui.findEls(body, (el) => el.type === 'textarea' && el.props['aria-label'] === 'Commit message')[0]
+    assert.equal(textarea.props.value, 'persisted draft', 'the draft restores')
+    const dirRow = ui.findEls(body, (el) => el.props && String(el.props.className || '').includes('dgw-dirbtn') && ownText(el).includes('src'))[0]
+    dirRow.props.onClick()
+    ;({ body } = ui.render())
+    assert.equal(JSON.parse(saved.get(key)).dirOpen['unstaged:src'], false, 'directory collapse persists')
+    const group = ui.findEls(body, (el) => el.props && String(el.props.className || '').includes('dgw-grouphd') && ownText(el).startsWith('Unstaged'))[0]
+    group.props.onClick()
+    ;({ body } = ui.render())
+    assert.equal(JSON.parse(saved.get(key)).groupOpen.unstaged, false, 'group collapse persists')
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage
+    else globalThis.localStorage = previous
+  }
+})
+
+test('the panel has no tabs; PR content and checks live in the same flow', () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: { number: 7, title: 'Add thing', state: 'OPEN', merged: false, url: 'https://github.com/o/r/pull/7', comments: [] },
+          ci: { status: 'success', checks: [{ name: 'build', status: 'completed', conclusion: 'success' }] },
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation)
+  const { body } = ui.render()
+  assert.equal(ui.findEls(body, (el) => el.props && el.props.role === 'tab').length, 0, 'no tab bar')
+  assert.ok(ui.findEls(body, (el) => el.type === 'span' && ownText(el) === 'PR #7').length > 0, 'PR status renders inline')
+  assert.ok(ui.findEls(body, (el) => el.props && el.props.title === 'Merge this pull request with the selected method').length > 0, 'merge control renders inline')
+  assert.equal(ui.findEls(body, (el) => el.props && el.props.title === 'Fetch failure logs').length, 0, 'passing checks do not show a log CTA')
+})
+
+test('push publishes a branch without an upstream; pull stays disabled until one exists', async () => {
+  const mock = sessionMock()
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: null, ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: null,
+          ci: null,
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation, { ctxExtras: withSessions(mock) })
+  const { body } = ui.render()
+  const byLabel = (label) => ui.findEls(body, (el) => el.type === 'button' && ownText(el) === label)[0]
+  assert.equal(byLabel('Pull').props.disabled, true, 'pull needs an upstream')
+  assert.notEqual(byLabel('Push').props.disabled, true, 'push can publish a new branch')
+  await byLabel('Push').props.onClick()
+  await flush()
+  assert.deepEqual(mock.commands, ['/git-push {}', '/git-refresh {}'])
+})
+
+test('Create PR takes its title from the sampled commit array and targets the comparison base', async () => {
+  const mock = sessionMock()
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 2, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: null,
+          ci: null,
+          commits: [{ shortSha: 'abc1234', message: 'feat: sampled title', author: 'me', date: 'now' }],
+          comparison: { base: 'main', ahead: 2, behind: 0 },
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation, { ctxExtras: withSessions(mock) })
+  const { body } = ui.render()
+  assert.ok(ui.findEls(body, (el) => ownText(el) === '→ main').length > 0, 'the empty PR target prefers the comparison base over the upstream')
+  assert.equal(ui.findEls(body, (el) => ownText(el) === '→ origin/feature/x').length, 0, 'the upstream is not presented as the PR target')
+  const create = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Create PR')[0]
+  await create.props.onClick()
+  await flush()
+  const line = mock.commands.find((c) => c.startsWith('/git-pr-create '))
+  const args = JSON.parse(line.slice('/git-pr-create '.length))
+  assert.equal(args.title, 'feat: sampled title')
+  assert.equal(args.base, 'main')
+  assert.equal(args.head, 'feature/x')
+})
+
+test('the PR header names the head and base branch and hides empty line stats', () => {
+  const conversation = {
+    nodes: [
+      {
+        kind: 'tool-result',
+        callId: 'c1',
+        call: { name: 'git_workspace', argsRaw: '{}' },
+        content: [{ type: 'text', text: 'x' }],
+        isError: false,
+        meta: {
+          repository: { name: 'repo' },
+          branch: { name: 'feature/x', upstream: 'origin/feature/x', ahead: 0, behind: 0 },
+          changes: { modified: 0, staged: 0, deleted: 0, renamed: 0, untracked: 0 },
+          clean: true,
+          pullRequest: { number: 7, title: 'Add thing', state: 'OPEN', base: 'main', merged: false, url: 'https://github.com/o/r/pull/7', comments: [] },
+          ci: null,
+          additionsTotal: 0,
+          deletionsTotal: 0,
+          commitsAhead: 0,
+        },
+      },
+    ],
+  }
+  const ui = interactiveHeader(conversation)
+  const { body } = ui.render()
+  assert.ok(ui.findEls(body, (el) => ownText(el) === 'feature/x → main').length > 0)
+  assert.equal(ui.findEls(body, (el) => ownText(el) === '+0').length, 0, 'empty stats are hidden')
+  assert.equal(ui.findEls(body, (el) => ownText(el) === '-0').length, 0, 'empty stats are hidden')
+})
+
+test('client icons resolve against the current primitives names', () => {
+  const stub = (name) => Object.assign(() => null, { stubName: name })
+  const primitives = new Proxy(
+    { writeClipboard: () => {} },
+    {
+      get(target, key) {
+        if (typeof key !== 'string') return undefined
+        if (key === 'writeClipboard') return target[key]
+        if (key === 'Tooltip' || key === 'Pill' || key === 'StateDot' || key === 'Button') {
+          if (!target[key]) target[key] = stub(key)
+          return target[key]
+        }
+        if (/^Icon.*(Regular|Medium)$/.test(key)) {
+          if (!target[key]) target[key] = stub(key)
+          return target[key]
+        }
+        return undefined
+      },
+    },
+  )
+  const ui = interactiveHeader(DIFF_CONVERSATION, { externals: { primitives } })
+  const { body, drawerEl } = ui.render()
+  assert.ok(ui.findEls(body, (el) => el.type && el.type.stubName === 'IconBranchOutlineRegular').length > 0, 'branch icon resolves to the Regular export')
+  const closeTip = ui.findEls(drawerEl, (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === 'Close Git workspace (Esc)')[0]
+  const closeBtn = Array.isArray(closeTip.props.children) ? closeTip.props.children[0] : closeTip.props.children
+  assert.equal(closeBtn.props.children.type.stubName, 'IconCloseFillRegular', 'close icon resolves to the Regular export')
+  assert.equal(ui.findEls(body, (el) => el.type && /Outline(14|16)$/.test(el.type.stubName || '')).length, 0, 'no numbered icon names are assumed')
 })
