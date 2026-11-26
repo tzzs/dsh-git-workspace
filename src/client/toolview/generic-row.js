@@ -19,9 +19,9 @@ export function GenericRow({ toolName, block }) {
           style: {
             margin: 0,
             fontFamily: 'var(--dsw-font-family-code)',
-            fontSize: '12px',
+            fontSize: 'var(--dgw-font-md)',
             lineHeight: '18px',
-            color: 'var(--dsw-alias-label-secondary)',
+            color: 'var(--dgw-text-2)',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
           },

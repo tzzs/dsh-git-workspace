@@ -1,11 +1,11 @@
 import * as React from 'react'
 import * as ReactDOM from 'react-dom'
 import {
-  Tooltip,
   StateDot,
   writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
+  ensureIconSprite,
   IconCheckOutline14,
   IconCopyOutline16,
   IconChevronRightOutline14,
@@ -13,143 +13,74 @@ import {
 
 const S = {
   card: {
-    border: '1px solid var(--dsw-alias-border-l1)',
-    borderRadius: '10px',
-    background: 'var(--dsw-alias-bg-base)',
+    border: '1px solid var(--dgw-border)',
+    borderRadius: 'var(--dgw-radius-lg,10px)',
+    background: 'var(--dgw-bg)',
     overflow: 'hidden',
-    margin: '4px 0',
+    margin: 'var(--dgw-space-1,4px) 0',
   },
   header: {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
-    padding: '6px 10px',
-    fontSize: '12px',
-    lineHeight: '16px',
+    gap: 'var(--dgw-space-1,4px)',
+    padding: 'var(--dgw-space-1,4px) var(--dgw-space-3,12px)',
+    fontSize: 'var(--dgw-font-md,12px)',
+    lineHeight: 'var(--dgw-line-tight,16px)',
   },
   title: {
-    fontSize: '12px',
-    lineHeight: '16px',
-    color: 'var(--dsw-alias-label-primary)',
+    fontSize: 'var(--dgw-font-md,12px)',
+    lineHeight: 'var(--dgw-line-tight,16px)',
+    color: 'var(--dgw-text)',
     fontWeight: 500,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   },
   sub: {
-    color: 'var(--dsw-alias-label-secondary)',
+    color: 'var(--dgw-text-2)',
   },
   caption: {
-    color: 'var(--dsw-alias-label-caption)',
+    color: 'var(--dgw-text-3)',
   },
   body: {
-    padding: '2px 10px 8px',
+    padding: 'var(--dgw-space-1,4px) var(--dgw-space-3,12px) var(--dgw-space-2,8px)',
   },
   row: {
     display: 'flex',
     alignItems: 'center',
     minWidth: 0,
-    gap: '6px',
+    gap: 'var(--dgw-space-1,4px)',
     padding: '2px 0',
-    fontSize: '12px',
+    fontSize: 'var(--dgw-font-md,12px)',
     lineHeight: '17px',
     cursor: 'default',
   },
   monospace: {
     fontFamily: 'var(--dsw-font-family-code)',
-    fontSize: '11px',
+    fontSize: 'var(--dgw-font-sm,11px)',
   },
   pill: {
     borderRadius: '999px',
     padding: '0 7px',
-    fontSize: '10px',
+    fontSize: 'var(--dgw-font-xs,10px)',
     lineHeight: '15px',
     fontWeight: 500,
     whiteSpace: 'nowrap',
     flex: 'none',
   },
-  add: { color: 'var(--dsw-alias-state-success-primary)' },
-  del: { color: 'var(--dsw-alias-state-error-primary)' },
-  warn: { color: 'var(--dsw-alias-state-warn-primary)' },
-  muted: { color: 'var(--dsw-alias-label-tertiary)' },
+  add: { color: 'var(--dgw-success-strong)' },
+  del: { color: 'var(--dgw-error-strong)' },
+  warn: { color: 'var(--dgw-warn-strong)' },
+  muted: { color: 'var(--dgw-text-3)' },
 }
 
-export const STYLE_SHEET = [
-  '.dgw-iconbtn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:none;background:none;border-radius:6px;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;transition:background .12s ease,color .12s ease}',
-  '.dgw-iconbtn:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}',
-  '.dgw-row{position:relative;border-radius:6px;margin:0 -6px;padding:2px 6px;transition:background .1s ease}',
-  '.dgw-row:hover{background:var(--dsw-alias-interactive-bg-hover)}',
-  '.dgw-row[data-active="true"]{background:var(--dsw-alias-interactive-bg-hover-solid)}',
-  '.dgw-copy{opacity:0;transition:opacity .12s ease}',
-  '.dgw-row:hover .dgw-copy,.dgw-copy:focus-within{opacity:1}',
-  // The copy-path button sits in nearly every tree row; the shared 24px
-  // .dgw-iconbtn footprint was setting each row's min-height regardless of
-  // its 12-13px text, which read as excess space between files. Only shrink
-  // it where it's paired with .dgw-copy (i.e. CopyBtn), not other icon
-  // buttons (refresh, close) that still want the full touch target.
-  '.dgw-copy.dgw-iconbtn{width:20px;height:20px}',
-  '.dgw-link{text-decoration:none}.dgw-link:hover{text-decoration:underline}',
-  '.dgw-chevron{transition:transform .15s ease;flex:none;display:inline-flex;color:var(--dsw-alias-label-caption)}',
-  '.dgw-chevron[data-open="true"]{transform:rotate(90deg)}',
-  '.dgw-textarea{width:100%;box-sizing:border-box;min-height:30px;padding:6px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);font-size:12px;line-height:17px;resize:vertical;outline:none;transition:border-color .12s ease}',
-  '.dgw-textarea:focus{border-color:var(--dsw-alias-brand-primary)}',
-  '.dgw-textarea::placeholder{color:var(--dsw-alias-label-caption)}',
-  '.dgw-stagebtn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;height:28px;padding:0 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);font-size:12px;font-weight:500;cursor:pointer;transition:background .12s ease}',
-  '.dgw-stagebtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}',
-  '.dgw-stagebtn:disabled{opacity:.45;cursor:default}',
-  '.dgw-mergebtn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;height:30px;padding:0 10px;border:none;border-radius:8px;background:var(--dsw-alias-state-success-primary);color:#fff;font-family:var(--dsw-font-family);font-size:12px;font-weight:600;cursor:pointer;transition:filter .12s ease}',
-  '.dgw-mergebtn:hover:not(:disabled){filter:brightness(1.08)}',
-  '.dgw-mergebtn:disabled{opacity:.5;cursor:default}',
-  '.dgw-linkicon{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;color:var(--dsw-alias-label-caption);text-decoration:none;flex:none;transition:background .12s ease,color .12s ease}',
-  '.dgw-linkicon:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}',
-  '.dgw-dirbtn{display:flex;align-items:center;gap:5px;border:none;background:none;cursor:pointer;font-family:var(--dsw-font-family);text-align:left}',
-  '.dgw-actionmenu{position:absolute;right:0;top:calc(100% + 8px);width:240px;max-height:calc(100vh - 180px);overflow-y:auto;padding:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-2);box-shadow:-8px 12px 30px rgba(0,0,0,.16);z-index:5}',
-  '.dgw-action{display:block;width:100%;padding:7px 12px;border:0;border-radius:7px;background:none;color:var(--dsw-alias-label-primary);font:12px var(--dsw-font-family);text-align:left;cursor:pointer}',
-  '.dgw-action:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.dgw-action:disabled{color:var(--dsw-alias-label-caption);cursor:default}',
-  '.dgw-actionsep{height:1px;margin:4px 0;background:var(--dsw-alias-border-l1)}',
-  '.dgw-createpr{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 12px;border:none;border-radius:8px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-base);font-family:var(--dsw-font-family);font-size:12px;font-weight:600;cursor:pointer;flex:none;transition:opacity .12s ease}',
-  '.dgw-createpr:hover{opacity:.88}',
-  '.dgw-createpr:active{opacity:.78}',
-  '.dgw-createpr:disabled{opacity:.45;cursor:default}',
-  '.dgw-dock-open [data-git-workspace-drawer]{border-right:1px solid var(--dsw-alias-border-l2)}',
-  '.dgw-filebtn{display:flex;align-items:center;gap:5px;cursor:pointer;font-family:var(--dsw-font-family)}',
-  '.dgw-filebtn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}',
-  '.dgw-diff{display:flex;flex-direction:column;min-height:0;flex:1 1 auto;background:var(--dsw-alias-bg-base)}',
-  '.dgw-diff-head{display:flex;align-items:center;gap:6px;padding:8px 10px;flex:none;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}',
-  '.dgw-diff-body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain}',
-  '.dgw-diff-hunkhead{position:sticky;top:0;padding:1px 8px;font-family:var(--dsw-font-family-code);font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);white-space:nowrap}',
-  '.dgw-diff-line{display:flex;align-items:flex-start;font-family:var(--dsw-font-family-code);font-size:11.5px;line-height:17px;min-width:max-content}',
-  '.dgw-diff-gutter{flex:none;width:34px;padding-right:7px;box-sizing:border-box;text-align:right;color:var(--dsw-alias-label-caption);user-select:none}',
-  '.dgw-diff-text{font-family:inherit;font-size:inherit;color:var(--dsw-alias-label-primary);white-space:pre;tab-size:4}',
-  '.dgw-diff-splitpane{display:flex;align-items:stretch}',
-  '.dgw-diff-splitcol{flex:1 1 0;min-width:0;overflow-x:auto}',
-  '.dgw-diff-splitcol+.dgw-diff-splitcol{border-left:1px solid var(--dsw-alias-border-l1)}',
-  '.dgw-diff-split-empty{background:var(--dsw-alias-bg-layer-2)}',
-  '.dgw-statusbar{display:flex;align-items:center;gap:8px;padding:9px 2px 8px;flex:none;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}',
-  '.dgw-syncbtn{width:auto;height:22px;padding:0 8px;border-radius:6px;font-size:11px;gap:4px}',
-  '.dgw-grouphd{display:flex;align-items:center;gap:6px;padding:5px 2px 3px;cursor:pointer}',
-  '.dgw-groupactions{display:inline-flex;align-items:center;gap:4px;flex:none}',
-  '.dgw-minibtn{height:20px;padding:0 7px;border:1px solid var(--dsw-alias-border-l1);border-radius:5px;background:none;color:var(--dsw-alias-label-secondary);font:10.5px var(--dsw-font-family);cursor:pointer}',
-  '.dgw-minibtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
-  '.dgw-minibtn:disabled{opacity:.45;cursor:default}',
-  '.dgw-inline-diff{margin:3px 0 7px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:9px;overflow:hidden;background:var(--dsw-alias-bg-base);max-height:420px}',
-  '.dgw-inline-diff .dgw-diff{flex:none}',
-  '.dgw-inline-diff .dgw-diff-body{max-height:360px}',
-  '.dgw-diff-hunkhead{display:flex;align-items:center;gap:8px;justify-content:space-between}',
-  '.dgw-hunkactions{display:inline-flex;align-items:center;gap:3px;flex:none}',
-  '.dgw-hunkbtn{height:18px;padding:0 6px;border:1px solid var(--dsw-alias-border-l1);border-radius:5px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);font:10px var(--dsw-font-family);cursor:pointer;white-space:nowrap}',
-  '.dgw-hunkbtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
-  '.dgw-confirm-armed{color:var(--dsw-alias-state-error-primary)!important;border-color:var(--dsw-alias-state-error-primary)!important;font-weight:600}',
-  '.dgw-commitbar{flex:none;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);padding:8px 2px 10px;display:flex;flex-direction:column;gap:6px}',
-  '.dgw-changeshead{display:flex;align-items:center;gap:6px;padding:7px 2px 6px;flex:none}',
-  '.dgw-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}',
-  '.dgw-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:24px;z-index:1200}',
-  '.dgw-modal{width:100%;max-width:860px;max-height:calc(100vh - 48px);display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden}',
-].join('\n')
+import { STYLE_SHEET as STYLE_SHEET_SOURCE } from './styles.js'
+export const STYLE_SHEET = STYLE_SHEET_SOURCE
 
 let stylesInjected = false
 
 export function ensureStyles() {
+  ensureIconSprite()
   if (stylesInjected || typeof document === 'undefined') return
   stylesInjected = true
   try {
@@ -158,6 +89,103 @@ export function ensureStyles() {
     el.textContent = STYLE_SHEET
     document.head.appendChild(el)
   } catch {}
+}
+
+let tooltipSeq = 0
+
+export function Tooltip({ label, side = 'bottom', delayMs = 250, children }) {
+  const wrapRef = React.useRef(null)
+  const tipRef = React.useRef(null)
+  const timerRef = React.useRef(null)
+  const idRef = React.useRef(null)
+  if (idRef.current === null) idRef.current = `dgw-tip-${++tooltipSeq}`
+  const anchorName = `--dgw-anchor-${idRef.current}`
+
+  const hide = React.useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = null
+    const tip = tipRef.current
+    if (tip && typeof tip.hidePopover === 'function') {
+      try {
+        tip.hidePopover()
+      } catch {}
+    }
+  }, [])
+
+  const show = React.useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      const tip = tipRef.current
+      if (!tip) return
+      const trigger = wrapRef.current
+      const canAnchor =
+        typeof window !== 'undefined' &&
+        window.CSS &&
+        typeof window.CSS.supports === 'function' &&
+        window.CSS.supports('position-area: block-end')
+      if (!canAnchor && trigger && typeof trigger.getBoundingClientRect === 'function') {
+        const r = trigger.getBoundingClientRect()
+        const maxWidth = 248
+        const left = Math.max(8, Math.min(r.left, (window.innerWidth || 1024) - maxWidth))
+        tip.style.position = 'fixed'
+        tip.style.left = `${left}px`
+        tip.style.top = `${side === 'top' ? r.top - 8 : r.bottom + 8}px`
+        tip.style.translate = side === 'top' ? '0 -100%' : '0 0'
+      }
+      if (typeof tip.showPopover === 'function') {
+        try {
+          tip.showPopover()
+        } catch {}
+      }
+    }, Math.max(0, delayMs || 0))
+  }, [delayMs, side])
+
+  React.useEffect(() => {
+    const trigger = wrapRef.current
+    if (trigger && trigger.style && typeof trigger.style.setProperty === 'function') {
+      trigger.style.setProperty('anchor-name', anchorName)
+    }
+    const tip = tipRef.current
+    if (tip && tip.style && typeof tip.style.setProperty === 'function') {
+      tip.style.setProperty('position-anchor', anchorName)
+    }
+  }, [anchorName])
+
+  React.useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    },
+    [],
+  )
+
+  return React.createElement(
+    'span',
+    {
+      ref: wrapRef,
+      className: 'dgw-tip-wrap',
+      'data-tooltip': label,
+      onPointerEnter: show,
+      onPointerLeave: hide,
+      onFocus: show,
+      onBlur: hide,
+    },
+    children,
+    React.createElement(
+      'div',
+      {
+        ref: tipRef,
+        id: idRef.current,
+        popover: 'manual',
+        role: 'tooltip',
+        className: 'dgw-tooltip',
+        'data-dgw-tooltip': '',
+        'data-side': side,
+        onPointerEnter: show,
+        onPointerLeave: hide,
+      },
+      label,
+    ),
+  )
 }
 
 // A centered popup, portaled to `document.body` so it floats above the
@@ -181,7 +209,7 @@ export function Modal({ onClose, maxWidth, children }) {
       React.createElement(
         'div',
         {
-          className: 'dgw-modal',
+          className: 'dgw-root dgw-modal',
           role: 'dialog',
           'aria-modal': 'true',
           onClick: (e) => e.stopPropagation(),
@@ -194,76 +222,125 @@ export function Modal({ onClose, maxWidth, children }) {
   )
 }
 
-// A `.dgw-actionmenu` portaled to `document.body` and positioned from the
-// trigger's own `getBoundingClientRect()` (`position:fixed`, not the CSS
-// class's default `position:absolute;right:0`) instead of relying on a CSS
-// ancestor being the right positioning context — a small header nested
-// inside another positioned/scrolling ancestor (e.g. a Section header) can't
-// reliably provide that, and got the menu rendered in the wrong place.
-// Closes on Escape, a click outside, or scroll (rather than tracking scroll
-// to reposition, which risks the menu drifting from its trigger).
-export function DropdownMenu({ anchorRef, onClose, align = 'end', style, children }) {
+export function DropdownMenu({ anchorRef, onClose, align = 'end', placement = 'bottom', style, children }) {
   const [rect, setRect] = React.useState(null)
+  const menuRef = React.useRef(null)
+
   React.useEffect(() => {
-    const el = anchorRef && anchorRef.current
-    if (el && typeof el.getBoundingClientRect === 'function') setRect(el.getBoundingClientRect())
+    const trigger = anchorRef && anchorRef.current
+    if (trigger && typeof trigger.getBoundingClientRect === 'function') {
+      setRect(trigger.getBoundingClientRect())
+    }
+    const menu = menuRef.current
+    if (menu && typeof menu.showPopover === 'function') {
+      try {
+        menu.showPopover()
+      } catch {}
+    }
+    const timer = setTimeout(() => {
+      const first = menu && menu.querySelector && menu.querySelector('[role="button"],button')
+      if (first && typeof first.focus === 'function') first.focus()
+    }, 0)
+    return () => {
+      clearTimeout(timer)
+      if (menu && typeof menu.hidePopover === 'function') {
+        try {
+          menu.hidePopover()
+        } catch {}
+      }
+    }
   }, [anchorRef])
+
   React.useEffect(() => {
     if (typeof window === 'undefined') return undefined
     const onKey = (e) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+      const menu = menuRef.current
+      if (!menu || typeof menu.querySelectorAll !== 'function') return
+      const items = Array.from(menu.querySelectorAll('[role="button"], button')).filter(
+        (el) => !el.disabled,
+      )
+      if (items.length === 0) return
+      e.preventDefault()
+      const index = items.indexOf(document.activeElement)
+      const next = e.key === 'ArrowDown'
+        ? items[(index + 1 + items.length) % items.length]
+        : items[(index - 1 + items.length) % items.length]
+      if (next && typeof next.focus === 'function') next.focus()
     }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('scroll', onClose, true)
-    window.addEventListener('resize', onClose)
+    const onPointerDown = (e) => {
+      const menu = menuRef.current
+      const trigger = anchorRef && anchorRef.current
+      if (menu && menu.contains && menu.contains(e.target)) return
+      if (trigger && trigger.contains && trigger.contains(e.target)) return
+      onClose()
+    }
+    if (typeof window.addEventListener === 'function') {
+      window.addEventListener('keydown', onKey)
+      window.addEventListener('scroll', onClose, true)
+      window.addEventListener('resize', onClose)
+    }
+    if (typeof document.addEventListener === 'function') {
+      document.addEventListener('pointerdown', onPointerDown, true)
+    }
     return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('scroll', onClose, true)
-      window.removeEventListener('resize', onClose)
+      if (typeof window.removeEventListener === 'function') {
+        window.removeEventListener('keydown', onKey)
+        window.removeEventListener('scroll', onClose, true)
+        window.removeEventListener('resize', onClose)
+      }
+      if (typeof document.removeEventListener === 'function') {
+        document.removeEventListener('pointerdown', onPointerDown, true)
+      }
     }
-  }, [onClose])
+  }, [onClose, anchorRef])
+
   if (typeof document === 'undefined') return null
-  // Falls back to a 0,0 anchor (rather than bailing out) when there's no
-  // real DOM to measure — keeps this testable without a browser, and still
-  // renders *something* sane if a ref somehow never attaches in production.
+  const anchorEl = anchorRef && anchorRef.current
+  const portalHost =
+    anchorEl && typeof anchorEl.closest === 'function'
+      ? anchorEl.closest('[data-git-workspace-drawer]') || document.body
+      : document.body
   const r = rect || { top: 0, bottom: 0, left: 0, right: 0 }
   const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0
+  const menuStyle = {
+    position: 'fixed',
+    inset: 'auto',
+    margin: 0,
+    top: `${placement === 'top' ? r.top - 8 : r.bottom + 8}px`,
+    translate: placement === 'top' ? '0 -100%' : '0 0',
+    zIndex: 1200,
+    ...(align === 'end'
+      ? { right: `${Math.max(0, viewportWidth - r.right)}px` }
+      : { left: `${r.left}px` }),
+    ...(style || {}),
+  }
   return ReactDOM.createPortal(
     React.createElement(
-      React.Fragment,
-      null,
-      React.createElement('div', {
-        style: { position: 'fixed', inset: 0, zIndex: 1199 },
-        'data-git-workspace-dropdown-backdrop': '',
-        onClick: onClose,
-      }),
-      React.createElement(
-        'div',
-        {
-          className: 'dgw-actionmenu',
-          style: {
-            position: 'fixed',
-            top: `${r.bottom + 8}px`,
-            zIndex: 1200,
-            ...(align === 'end'
-              ? { right: `${Math.max(0, viewportWidth - r.right)}px` }
-              : { left: `${r.left}px` }),
-            ...(style || {}),
-          },
-          onClick: (e) => e.stopPropagation(),
-        },
-        children,
-      ),
+      'div',
+      {
+        ref: menuRef,
+        className: 'dgw-root dgw-actionmenu',
+        popover: 'manual',
+        'data-placement': placement,
+        style: menuStyle,
+        onClick: (e) => e.stopPropagation(),
+      },
+      children,
     ),
-    document.body,
+    portalHost,
   )
 }
 
 export function Card({ header, children }) {
   return React.createElement(
     'div',
-    { style: S.card, 'data-git-workspace-card': '' },
-    React.createElement('div', { style: { ...S.header, borderBottom: '1px solid var(--dsw-alias-border-l1)' } }, header),
+    { className: 'dgw-root', style: S.card, 'data-git-workspace-card': '' },
+    React.createElement('div', { style: { ...S.header, borderBottom: '1px solid var(--dgw-border)' } }, header),
     children ? React.createElement('div', { style: S.body }, children) : null,
   )
 }
@@ -283,8 +360,22 @@ export function Row({ children, style, className }) {
 export function Code({ children, style }) {
   return React.createElement(
     'span',
-    { style: { ...S.monospace, color: 'var(--dsw-alias-label-primary)', ...(style || {}) } },
+    { style: { ...S.monospace, color: 'var(--dgw-text)', ...(style || {}) } },
     children,
+  )
+}
+
+export function PathLabel({ path, prefix = '' }) {
+  const value = String(path || '')
+  const cut = value.lastIndexOf('/')
+  const dir = cut >= 0 ? value.slice(0, cut + 1) : ''
+  const base = cut >= 0 ? value.slice(cut + 1) : value
+  return React.createElement(
+    'span',
+    { className: 'dgw-path', title: prefix + value },
+    prefix ? React.createElement('span', { className: 'dgw-path__dir' }, prefix) : null,
+    dir ? React.createElement('span', { className: 'dgw-path__dir' }, dir) : null,
+    React.createElement('span', { className: 'dgw-path__base' }, base),
   )
 }
 
@@ -302,20 +393,20 @@ export function Muted({ children }) {
 }
 
 const STATE_COLORS = {
-  OPEN: 'var(--dsw-alias-state-success-primary)',
-  DRAFT: 'var(--dsw-alias-state-warn-primary)',
-  MERGED: 'var(--dsw-alias-label-secondary)',
-  CLOSED: 'var(--dsw-alias-label-secondary)',
-  success: 'var(--dsw-alias-state-success-primary)',
-  failure: 'var(--dsw-alias-state-error-primary)',
-  cancelled: 'var(--dsw-alias-state-error-primary)',
-  in_progress: 'var(--dsw-alias-state-warn-primary)',
-  queued: 'var(--dsw-alias-state-warn-primary)',
-  skipped: 'var(--dsw-alias-label-secondary)',
+  OPEN: 'var(--dgw-success-strong)',
+  DRAFT: 'var(--dgw-warn-strong)',
+  MERGED: 'var(--dgw-text-2)',
+  CLOSED: 'var(--dgw-text-2)',
+  success: 'var(--dgw-success-strong)',
+  failure: 'var(--dgw-error-strong)',
+  cancelled: 'var(--dgw-error-strong)',
+  in_progress: 'var(--dgw-warn-strong)',
+  queued: 'var(--dgw-warn-strong)',
+  skipped: 'var(--dgw-text-2)',
 }
 
 export function Pill({ text, color }) {
-  const resolved = color || STATE_COLORS[text] || 'var(--dsw-alias-label-secondary)'
+  const resolved = color || STATE_COLORS[text] || 'var(--dgw-text-2)'
   return React.createElement(
     'span',
     {
@@ -337,8 +428,8 @@ export function Stat({ text, color }) {
     {
       style: {
         fontFamily: 'var(--dsw-font-family-code)',
-        fontSize: '11px',
-        color: resolved || 'var(--dsw-alias-label-secondary)',
+        fontSize: 'var(--dgw-font-sm)',
+        color: resolved || 'var(--dgw-text-2)',
         whiteSpace: 'nowrap',
       },
     },
@@ -434,98 +525,47 @@ export function Section({ icon, title, count, defaultOpen = true, right, plain =
   const [open, setOpen] = React.useState(defaultOpen)
   return React.createElement(
     'section',
-    {
-      'data-dgw-section': open ? 'open' : 'closed',
-      style: {
-        borderTop: '1px solid var(--dsw-alias-border-l1)',
-        flex: 'none',
-      },
-    },
+    { className: 'dgw-section', 'data-dgw-section': open ? 'open' : 'closed' },
     React.createElement(
       'button',
       {
         type: 'button',
-        // Same `.dgw-row` class (and the same 2px left padding a depth-0
-        // DirNode uses) as the tree rows in the body below, so the header's
-        // own chevron lines up with the tree's instead of drifting off by
-        // the row class's -6px hover-bleed margin, which only the body's
-        // rows were otherwise absorbing (see the body wrapper's padding).
-        className: 'dgw-row',
+        className: 'dgw-section__hd',
         onClick: () => setOpen((v) => !v),
         'aria-expanded': open,
-        style: {
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          width: '100%',
-          padding: '8px 2px',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          textAlign: 'left',
-          fontFamily: 'var(--dsw-font-family)',
-        },
       },
       React.createElement(
         'span',
         { className: 'dgw-chevron', 'data-open': String(open) },
-        React.createElement(IconChevronRightOutline14, { size: 13 }),
+        React.createElement(IconChevronRightOutline14, { size: 14 }),
       ),
       icon || null,
       React.createElement(
         'span',
-        {
-          style: plain
-            ? {
-                fontSize: '12px',
-                fontWeight: 500,
-                color: 'var(--dsw-alias-label-primary)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }
-            : {
-                fontSize: '11px',
-                fontWeight: 600,
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
-                color: 'var(--dsw-alias-label-secondary)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              },
-        },
+        { className: plain ? 'dgw-section__plain' : undefined, style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
         title,
       ),
       count != null
-        ? React.createElement(
-            'span',
-            { style: { fontSize: '11px', fontWeight: 600, color: 'var(--dsw-alias-label-caption)' } },
-            String(count),
-          )
+        ? React.createElement('span', { className: 'dgw-grouphd__count' }, String(count))
         : null,
-      React.createElement('span', { style: { flex: '1 1 auto' } }),
+      React.createElement('span', { className: 'dgw-spacer' }),
       right,
     ),
-    // No horizontal padding here — the header button above and every tree
-    // row below share the same `.dgw-row` class (and hence its -6px margin),
-    // so they only stay aligned if this wrapper doesn't add its own offset
-    // on top of theirs.
     open && children != null
-      ? React.createElement('div', { style: { padding: '0 0 10px' } }, children)
+      ? React.createElement('div', { className: 'dgw-section__body' }, children)
       : null,
   )
 }
 
 export function TintPill({ text, color }) {
-  const resolved = color || STATE_COLORS[text] || 'var(--dsw-alias-label-secondary)'
+  const resolved = color || STATE_COLORS[text] || 'var(--dgw-text-2)'
   return React.createElement(
     'span',
     {
       style: {
-        borderRadius: '6px',
+        borderRadius: 'var(--dgw-radius-sm)',
         padding: '0 6px',
-        fontSize: '10px',
+        fontSize: 'var(--dgw-font-xs)',
         lineHeight: '15px',
         fontWeight: 600,
         letterSpacing: '0.02em',
@@ -540,9 +580,9 @@ export function TintPill({ text, color }) {
 }
 
 const CIRCLE_TONES = {
-  success: 'var(--dsw-alias-state-success-primary)',
-  error: 'var(--dsw-alias-state-error-primary)',
-  warn: 'var(--dsw-alias-state-warn-primary)',
+  success: 'var(--dgw-success-strong)',
+  error: 'var(--dgw-error-strong)',
+  warn: 'var(--dgw-warn-strong)',
 }
 
 export function CircleIcon({ tone, size = 16, children }) {
@@ -556,8 +596,8 @@ export function CircleIcon({ tone, size = 16, children }) {
         width: `${size}px`,
         height: `${size}px`,
         borderRadius: '50%',
-        background: CIRCLE_TONES[tone] || 'var(--dsw-alias-label-caption)',
-        color: '#fff',
+        background: CIRCLE_TONES[tone] || 'var(--dgw-text-3)',
+        color: 'var(--dgw-on-accent,var(--dsw-alias-label-primary-inverted))',
         flex: 'none',
       },
     },
@@ -622,11 +662,11 @@ export function Path({ path, openFile }) {
         padding: 0,
         textAlign: 'left',
         color: openFile
-          ? 'var(--dsw-alias-label-primary)'
-          : 'var(--dsw-alias-label-secondary)',
+          ? 'var(--dgw-text)'
+          : 'var(--dgw-text-2)',
         cursor: openFile ? 'pointer' : 'default',
         textDecoration: openFile ? 'underline' : 'none',
-        textDecorationColor: 'var(--dsw-alias-label-caption)',
+        textDecorationColor: 'var(--dgw-text-3)',
         minWidth: 0,
         overflow: 'hidden',
         textOverflow: 'ellipsis',

@@ -9,7 +9,7 @@ function FileRow({ file, openFile }) {
     { className: 'dgw-row' },
     React.createElement(
       'span',
-      { style: { width: '16px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', fontWeight: 600, textAlign: 'center' } },
+      { style: { width: '16px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: 'var(--dgw-font-md)', fontWeight: 600, textAlign: 'center' } },
       status,
     ),
     React.createElement(

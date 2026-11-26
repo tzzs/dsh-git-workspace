@@ -1,26 +1,29 @@
-import * as React from 'react'
-import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  Icon as IconImpl,
+  ensureIconSprite as ensureIconSpriteImpl,
+  IconBranchOutline16 as IconBranchOutline16Impl,
+  IconCheckOutline14 as IconCheckOutline14Impl,
+  IconChevronRightOutline14 as IconChevronRightOutline14Impl,
+  IconCloseFill14 as IconCloseFill14Impl,
+  IconCodeOutline16 as IconCodeOutline16Impl,
+  IconCopyOutline16 as IconCopyOutline16Impl,
+  IconFolderOpenOutline16 as IconFolderOpenOutline16Impl,
+  IconPlusOutline16 as IconPlusOutline16Impl,
+  IconRefreshOutline14 as IconRefreshOutline14Impl,
+  IconRightUpOutline16 as IconRightUpOutline16Impl,
+  IconWarningOutline16 as IconWarningOutline16Impl,
+} from './icon-sprite.js'
 
-function fallbackIcon(props) {
-  const size = (props && props.size) || 12
-  return React.createElement('span', { 'aria-hidden': 'true', style: { display: 'inline-block', width: `${size}px`, height: `${size}px` } })
-}
-
-function icon(legacy, ...current) {
-  for (const name of [legacy, ...current]) {
-    if (typeof primitives[name] === 'function') return primitives[name]
-  }
-  return fallbackIcon
-}
-
-export const IconBranchOutline16 = icon('IconBranchOutline16', 'IconBranchOutlineRegular', 'IconBranchOutlineMedium')
-export const IconCheckOutline14 = icon('IconCheckOutline14', 'IconCheckOutlineRegular', 'IconCheckOutlineMedium')
-export const IconChevronRightOutline14 = icon('IconChevronRightOutline14', 'IconChevronRightOutlineRegular', 'IconChevronRightOutlineMedium')
-export const IconCloseFill14 = icon('IconCloseFill14', 'IconCloseFillRegular', 'IconCloseFillMedium')
-export const IconCodeOutline16 = icon('IconCodeOutline16', 'IconCodeOutlineRegular', 'IconCodeOutlineMedium')
-export const IconCopyOutline16 = icon('IconCopyOutline16', 'IconCopyOutlineRegular', 'IconCopyOutlineMedium')
-export const IconFolderOpenOutline16 = icon('IconFolderOpenOutline16', 'IconFolderOpenOutlineRegular', 'IconFolderOpenOutlineMedium')
-export const IconPlusOutline16 = icon('IconPlusOutline16', 'IconPlusOutlineRegular', 'IconPlusOutlineMedium')
-export const IconRefreshOutline14 = icon('IconRefreshOutline14', 'IconRefreshOutlineRegular', 'IconRefreshOutlineMedium')
-export const IconRightUpOutline16 = icon('IconRightUpOutline16', 'IconRightUpOutlineRegular', 'IconRightUpOutlineMedium')
-export const IconWarningOutline16 = icon('IconWarningOutline16', 'IconWarningOutlineRegular', 'IconWarningOutlineMedium')
+export const Icon = IconImpl
+export const ensureIconSprite = ensureIconSpriteImpl
+export const IconBranchOutline16 = IconBranchOutline16Impl
+export const IconCheckOutline14 = IconCheckOutline14Impl
+export const IconChevronRightOutline14 = IconChevronRightOutline14Impl
+export const IconCloseFill14 = IconCloseFill14Impl
+export const IconCodeOutline16 = IconCodeOutline16Impl
+export const IconCopyOutline16 = IconCopyOutline16Impl
+export const IconFolderOpenOutline16 = IconFolderOpenOutline16Impl
+export const IconPlusOutline16 = IconPlusOutline16Impl
+export const IconRefreshOutline14 = IconRefreshOutline14Impl
+export const IconRightUpOutline16 = IconRightUpOutline16Impl
+export const IconWarningOutline16 = IconWarningOutline16Impl

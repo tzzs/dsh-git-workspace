@@ -775,6 +775,24 @@ function flush() {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+function tipWrap(ui, root, label) {
+  return ui.findEls(root, (el) => el.props && el.props['data-tooltip'] === label)[0]
+}
+
+function tipButton(ui, root, label) {
+  const wrap = tipWrap(ui, root, label)
+  if (!wrap) return null
+  const child = Array.isArray(wrap.props.children) ? wrap.props.children[0] : wrap.props.children
+  if (!child) return null
+  if (child.type === 'button') return child
+  if (typeof child.type === 'function') return ui.renderEl(child)
+  return null
+}
+
+function hoverLabels(ui, root) {
+  return ui.findEls(root, (el) => el.props && typeof el.props['data-tooltip'] === 'string').map((el) => el.props['data-tooltip'])
+}
+
 const DIFF_CONVERSATION = {
   nodes: [
     {
@@ -827,13 +845,13 @@ test('clicking a file row opens its diff inline in the same panel, closable agai
   ;({ body } = ui.render())
   const diffs = ui.findEls(body, (el) => el.props && el.props['data-git-workspace-diff'] === '')
   assert.equal(diffs.length, 1, 'the same panel renders the diff for the clicked file')
-  const text = collectText(diffs[0]).join('\n')
-  assert.ok(text.includes('@@ -1,3 +1,4 @@'), 'hunk header renders')
-  assert.ok(text.includes('context') && text.includes('old line') && text.includes('new line 2'), 'diff lines render')
-  const closeTip = ui.findEls(diffs[0], (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === 'Close diff')[0]
-  assert.ok(closeTip, 'viewer exposes a close action')
-  const innerToggle = Array.isArray(closeTip.props.children) ? closeTip.props.children[0] : closeTip.props.children
-  innerToggle.props.onClick()
+  const hunkText = ui.findEls(diffs[0], (el) => el.type === 'span' && ownText(el).startsWith('@@ -')).map(ownText)
+  assert.ok(hunkText.some((t) => t.includes('@@ -1,3 +1,4 @@')), 'hunk header renders')
+  const lineText = ui.findEls(diffs[0], (el) => el.type === 'code').map(ownText).join('\n')
+  assert.ok(lineText.includes('context') && lineText.includes('old line') && lineText.includes('new line 2'), 'diff lines render')
+  const closeBtn = tipButton(ui, diffs[0], 'Close diff')
+  assert.ok(closeBtn, 'viewer exposes a close action')
+  closeBtn.props.onClick()
   ;({ body } = ui.render())
   assert.equal(ui.findEls(body, (el) => el.props && el.props['data-git-workspace-diff'] === '').length, 0, 'the inline diff closes on demand')
 })
@@ -853,8 +871,10 @@ test('the inline diff toggles between unified and left/right split, pairing remo
   ;({ body } = ui.render())
   diff = ui.findEls(body, (el) => el.props && el.props['data-git-workspace-diff'] === '')[0]
   const cols = ui.findEls(diff, (el) => String(el.props && el.props.className) === 'dgw-diff-splitcol')
-  assert.equal(cols.length, 2, 'split view renders two columns')
-  const [left, right] = cols.map((col) => collectText(col).join('\n'))
+  assert.ok(cols.length >= 2 && cols.length % 2 === 0, 'split view renders paired columns')
+  const textOfCol = (col) => ui.findEls(col, (el) => el.type === 'code').map(ownText).join('\n')
+  const left = cols.filter((_, i) => i % 2 === 0).map(textOfCol).join('\n')
+  const right = cols.filter((_, i) => i % 2 === 1).map(textOfCol).join('\n')
   assert.ok(left.includes('old line') && !left.includes('new line'), 'left column only carries the removed line')
   assert.ok(right.includes('new line') && right.includes('new line 2') && !right.includes('old line'), 'right column only carries the added lines')
   assert.ok(left.includes('context') && right.includes('context'), 'context lines mirror onto both columns')
@@ -884,7 +904,7 @@ test('rows without patch data stay inert; omitted diffs offer a native diff CTA'
   let { body } = ui.render()
   const plainRows = ui.findEls(body, (el) => {
     const cls = el.props && el.props.className
-    return cls && String(cls).includes('dgw-row') && !String(cls).includes('dgw-dirbtn') && !String(cls).includes('dgw-filebtn') && ownText(el).includes('no-hunks.ts')
+    return cls && String(cls).includes('dgw-static') && ownText(el).includes('no-hunks.ts')
   })
   assert.ok(plainRows.length >= 1, 'plain row renders without interactivity markers')
   const binRow = ui.findEls(body, (el) => el.props && String(el.props.className || '').includes('dgw-filebtn')).find((el) => ownText(el).includes('huge.bin'))
@@ -951,15 +971,8 @@ test('a folder row\'s hover control stages every file under it in one dispatch, 
     },
   })
   let { body } = ui.render()
-  // `IconBtn` wraps its real `<button>` in the host Tooltip primitive, which
-  // is a stub in this harness (see makePrimitivesStub) — `walk` stops at a
-  // stub rather than rendering into it, so the button underneath has to be
-  // read directly off the Tooltip element's `children` prop instead of via
-  // another `findEls` pass (same pattern the diff popup's close-button test
-  // above uses).
-  const stageDirTip = ui.findEls(body, (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === 'Stage folder')[0]
-  assert.ok(stageDirTip, 'unstaged folder shows a stage-all-in-folder control')
-  const stageDirBtn = Array.isArray(stageDirTip.props.children) ? stageDirTip.props.children[0] : stageDirTip.props.children
+  const stageDirBtn = tipButton(ui, body, 'Stage folder')
+  assert.ok(stageDirBtn, 'unstaged folder shows a stage-all-in-folder control')
   await stageDirBtn.props.onClick()
   assert.deepEqual(mock.commands, ['/git-stage {"paths":["src/a.ts","src/b.ts"]}', '/git-refresh {}'], 'stages every file under the folder in one dispatch')
 })
@@ -1054,11 +1067,9 @@ test('the discard hover controls dispatch git-discard-paths scoped to the folder
   })
   let { body } = ui.render()
   const findConfirm = (label) => {
-    const tip = ui.findEls(body, (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === label)[0]
-    assert.ok(tip, `${label} control renders`)
-    const child = Array.isArray(tip.props.children) ? tip.props.children[0] : tip.props.children
-    assert.equal(typeof child.type, 'function', `${label} renders a confirm button`)
-    return ui.renderEl(child)
+    const btn = tipButton(ui, body, label)
+    assert.ok(btn, `${label} control renders`)
+    return btn
   }
   const confirm = async (label) => {
     findConfirm(label).props.onClick()
@@ -1114,14 +1125,13 @@ test('a fully staged file or folder offers only Unstage on hover — no Discard,
     },
   })
   const { body } = ui.render()
-  const tipLabels = ui.findEls(body, (el) => el.type && el.type.stubName === 'Tooltip').map((el) => el.props.label)
+  const tipLabels = hoverLabels(ui, body)
   assert.ok(tipLabels.includes('Unstage folder'), 'the fully staged folder offers Unstage')
   assert.ok(tipLabels.includes('Unstage this file'), 'a fully staged file offers Unstage')
   assert.ok(!tipLabels.includes('Discard folder') && !tipLabels.includes('Stage folder'), 'no Discard/Stage once the whole folder is staged')
   assert.ok(!tipLabels.includes('Discard changes to this file') && !tipLabels.includes('Stage this file'), 'no Discard/Stage once the file is staged')
   assert.ok(!tipLabels.includes('Copy path'), 'copy-path is no longer one of the row hover controls')
-  const unstageTip = ui.findEls(body, (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === 'Unstage folder')[0]
-  const unstageBtn = Array.isArray(unstageTip.props.children) ? unstageTip.props.children[0] : unstageTip.props.children
+  const unstageBtn = tipButton(ui, body, 'Unstage folder')
   await unstageBtn.props.onClick()
   assert.deepEqual(mock.commands, ['/git-unstage {"paths":["src/a.ts","src/b.ts"]}', '/git-refresh {}'], 'unstaging the folder targets every staged file under it')
 })
@@ -1589,7 +1599,7 @@ test('the merge split button merges with the default method; the chevron menu sw
       },
     },
   })
-  let { body } = ui.render()
+  let { body, dropdownMenu } = ui.render()
 
   const mergeBtn = ui.findEls(body, (el) => el.type === 'button' && el.props.title === 'Merge this pull request with the selected method')[0]
   assert.equal(ownText(mergeBtn), 'Squash and merge', 'squash is the default method')
@@ -1599,8 +1609,8 @@ test('the merge split button merges with the default method; the chevron menu sw
 
   const menuBtn = ui.findEls(body, (el) => el.type === 'button' && el.props['aria-label'] === 'Choose merge method, or close this pull request')[0]
   menuBtn.props.onClick()
-  ;({ body } = ui.render())
-  const mergeCommitItem = ui.findEls(body, (el) => el.props && el.props.role === 'button' && ownText(el).includes('Create a merge commit'))[0]
+  ;({ body, dropdownMenu } = ui.render())
+  const mergeCommitItem = ui.findEls(dropdownMenu, (el) => el.props && el.props.role === 'button' && ownText(el).includes('Create a merge commit'))[0]
   assert.ok(mergeCommitItem, 'the dropdown lists the other merge methods')
   mergeCommitItem.props.onClick()
   ;({ body } = ui.render())
@@ -1610,12 +1620,12 @@ test('the merge split button merges with the default method; the chevron menu sw
 
   const menuBtn2 = ui.findEls(body, (el) => el.type === 'button' && el.props['aria-label'] === 'Choose merge method, or close this pull request')[0]
   menuBtn2.props.onClick()
-  ;({ body } = ui.render())
-  const closeItem = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Close pull request'))[0]
+  ;({ body, dropdownMenu } = ui.render())
+  const closeItem = ui.findEls(dropdownMenu, (el) => el.type === 'button' && ownText(el).includes('Close pull request'))[0]
   assert.ok(closeItem, 'the dropdown offers Close pull request')
   closeItem.props.onClick()
-  ;({ body } = ui.render())
-  const confirmClose = ui.findEls(body, (el) => el.type === 'button' && ownText(el).includes('Confirm close pull request'))[0]
+  ;({ body, dropdownMenu } = ui.render())
+  const confirmClose = ui.findEls(dropdownMenu, (el) => el.type === 'button' && ownText(el).includes('Confirm close pull request'))[0]
   assert.ok(confirmClose, 'closing the PR is a two-step destructive action')
   confirmClose.props.onClick()
   await flush()
@@ -1663,12 +1673,12 @@ test('branch/merge inputs offer known branches via a datalist; new-branch input 
       },
     },
   })
-  let { body } = ui.render()
-  const menuBtn = ui.findEls(body, (el) => el.type === 'button' && el.props['aria-label'] === 'More Git operations')[0]
+  let { body, dropdownMenu } = ui.render()
+  let menuBtn = ui.findEls(body, (el) => el.type === 'button' && el.props['aria-label'] === 'More Git operations')[0]
   assert.ok(menuBtn, 'git action menu toggle renders')
   menuBtn.props.onClick()
-  ;({ body } = ui.render())
-  const switchBtn = ui.findEls(body, (el) => el.type === 'button' && el.props.className === 'dgw-action' && ownText(el) === 'Switch Branch')[0]
+  ;({ body, dropdownMenu } = ui.render())
+  const switchBtn = ui.findEls(dropdownMenu, (el) => el.type === 'button' && el.props.className === 'dgw-action' && ownText(el) === 'Switch Branch')[0]
   assert.ok(switchBtn, 'Switch Branch menu item renders')
   switchBtn.props.onClick()
   ;({ body } = ui.render())
@@ -1680,9 +1690,10 @@ test('branch/merge inputs offer known branches via a datalist; new-branch input 
   const cancelBtn = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Cancel')[0]
   cancelBtn.props.onClick()
   ;({ body } = ui.render())
+  menuBtn = ui.findEls(body, (el) => el.type === 'button' && el.props['aria-label'] === 'More Git operations')[0]
   menuBtn.props.onClick()
-  ;({ body } = ui.render())
-  const newBtn = ui.findEls(body, (el) => el.type === 'button' && el.props.className === 'dgw-action' && ownText(el) === 'New Branch')[0]
+  ;({ body, dropdownMenu } = ui.render())
+  const newBtn = ui.findEls(dropdownMenu, (el) => el.type === 'button' && el.props.className === 'dgw-action' && ownText(el) === 'New Branch')[0]
   newBtn.props.onClick()
   ;({ body } = ui.render())
   const input2 = ui.findEls(body, (el) => el.type === 'input' && el.props['aria-label'] === 'Branch name')[0]
@@ -1748,12 +1759,12 @@ test('file row icon color reflects git status, with a caption fallback for unkno
   const { body } = ui.render()
   const iconSpans = ui.findEls(
     body,
-    (el) => el.type === 'span' && el.props && el.props.children && el.props.children.type && el.props.children.type.stubName === 'IconCodeOutline16',
+    (el) => el.type === 'span' && el.props && String(el.props.className || '').includes('dgw-fileicon'),
   )
   assert.equal(iconSpans.length, 2, 'both file rows render the generic file icon')
   const colors = iconSpans.map((el) => el.props.style.color)
-  assert.ok(colors.includes('var(--dsw-alias-state-error-primary)'), 'deleted file icon uses the delete color')
-  assert.ok(colors.includes('var(--dsw-alias-label-caption)'), 'unrecognized status falls back to the caption color')
+  assert.ok(colors.includes('var(--dgw-error-strong)'), 'deleted file icon uses the delete color')
+  assert.ok(colors.includes('var(--dgw-text-3)'), 'unrecognized status falls back to the caption color')
 })
 
 test('commit row expands to show author/date/sha on click; the diff button does not toggle it', async () => {
@@ -2185,7 +2196,10 @@ test('panel UI state persists selection, diff mode, group and directory state, a
     let { body } = ui.render()
     const diff = ui.findEls(body, (el) => el.props && el.props['data-git-workspace-diff'] === '')[0]
     assert.ok(diff, 'the selected file reopens its inline diff')
-    assert.equal(ui.findEls(diff, (el) => String(el.props && el.props.className) === 'dgw-diff-splitcol').length, 2, 'split mode restores')
+    assert.ok(
+      ui.findEls(diff, (el) => String(el.props && el.props.className) === 'dgw-diff-splitcol').length >= 2,
+      'split mode restores',
+    )
     const textarea = ui.findEls(body, (el) => el.type === 'textarea' && el.props['aria-label'] === 'Commit message')[0]
     assert.equal(textarea.props.value, 'persisted draft', 'the draft restores')
     const dirRow = ui.findEls(body, (el) => el.props && String(el.props.className || '').includes('dgw-dirbtn') && ownText(el).includes('src'))[0]
@@ -2286,8 +2300,8 @@ test('Create PR takes its title from the sampled commit array and targets the co
   }
   const ui = interactiveHeader(conversation, { ctxExtras: withSessions(mock) })
   const { body } = ui.render()
-  assert.ok(ui.findEls(body, (el) => ownText(el) === '→ main').length > 0, 'the empty PR target prefers the comparison base over the upstream')
-  assert.equal(ui.findEls(body, (el) => ownText(el) === '→ origin/feature/x').length, 0, 'the upstream is not presented as the PR target')
+  assert.ok(ui.findEls(body, (el) => ownText(el).includes('→ main')).length > 0, 'the empty PR target prefers the comparison base over the upstream')
+  assert.equal(ui.findEls(body, (el) => ownText(el).includes('→ origin/feature/x')).length, 0, 'the upstream is not presented as the PR target')
   const create = ui.findEls(body, (el) => el.type === 'button' && ownText(el) === 'Create PR')[0]
   await create.props.onClick()
   await flush()
@@ -2328,31 +2342,14 @@ test('the PR header names the head and base branch and hides empty line stats', 
   assert.equal(ui.findEls(body, (el) => ownText(el) === '-0').length, 0, 'empty stats are hidden')
 })
 
-test('client icons resolve against the current primitives names', () => {
-  const stub = (name) => Object.assign(() => null, { stubName: name })
-  const primitives = new Proxy(
-    { writeClipboard: () => {} },
-    {
-      get(target, key) {
-        if (typeof key !== 'string') return undefined
-        if (key === 'writeClipboard') return target[key]
-        if (key === 'Tooltip' || key === 'Pill' || key === 'StateDot' || key === 'Button') {
-          if (!target[key]) target[key] = stub(key)
-          return target[key]
-        }
-        if (/^Icon.*(Regular|Medium)$/.test(key)) {
-          if (!target[key]) target[key] = stub(key)
-          return target[key]
-        }
-        return undefined
-      },
-    },
-  )
-  const ui = interactiveHeader(DIFF_CONVERSATION, { externals: { primitives } })
+test('client uses one local SVG icon sprite with 14/16px sizes', () => {
+  const ui = interactiveHeader(DIFF_CONVERSATION)
   const { body, drawerEl } = ui.render()
-  assert.ok(ui.findEls(body, (el) => el.type && el.type.stubName === 'IconBranchOutlineRegular').length > 0, 'branch icon resolves to the Regular export')
-  const closeTip = ui.findEls(drawerEl, (el) => el.type && el.type.stubName === 'Tooltip' && el.props.label === 'Close Git workspace (Esc)')[0]
-  const closeBtn = Array.isArray(closeTip.props.children) ? closeTip.props.children[0] : closeTip.props.children
-  assert.equal(closeBtn.props.children.type.stubName, 'IconCloseFillRegular', 'close icon resolves to the Regular export')
-  assert.equal(ui.findEls(body, (el) => el.type && /Outline(14|16)$/.test(el.type.stubName || '')).length, 0, 'no numbered icon names are assumed')
+  const svgs = [...ui.findEls(body, (el) => el.type === 'svg' && el.props && el.props['data-icon']), ...ui.findEls(drawerEl, (el) => el.type === 'svg' && el.props && el.props['data-icon'])]
+  assert.ok(svgs.length > 0, 'the panel renders local sprite icons')
+  const names = svgs.map((el) => el.props['data-icon'])
+  assert.ok(names.includes('branch') && names.includes('refresh'), 'branch and action icons come from the sprite')
+  assert.ok(svgs.every((el) => el.props.width === 14 || el.props.width === 16), 'icons use the 14/16px sizes')
+  const uses = [...ui.findEls(body, (el) => el.type === 'use'), ...ui.findEls(drawerEl, (el) => el.type === 'use')]
+  assert.ok(uses.length > 0 && uses.every((el) => String(el.props.href).startsWith('#dgw-ic-')), 'icons reference the local sprite symbols')
 })
