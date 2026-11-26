@@ -29,7 +29,7 @@ export function ShowRow({ block, openFile }) {
         { key: f.path + i },
         React.createElement(
           'span',
-          { style: { width: '18px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', fontWeight: 600 } },
+          { style: { width: '18px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: 'var(--dgw-font-md)', fontWeight: 600 } },
           (f.status || 'M').toUpperCase(),
         ),
         React.createElement(
@@ -40,7 +40,7 @@ export function ShowRow({ block, openFile }) {
             onClick: openFile ? () => openFile(f.path) : undefined,
             style: {
               background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: openFile ? 'pointer' : 'default',
-              fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', color: 'var(--dsw-alias-label-primary)',
+              fontFamily: 'var(--dsw-font-family-code)', fontSize: 'var(--dgw-font-md)', color: 'var(--dgw-text)',
               minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto',
             },
           },

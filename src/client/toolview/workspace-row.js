@@ -20,13 +20,13 @@ function BranchLine({ branch }) {
   parts.push(
     React.createElement(
       'span',
-      { key: 'name', style: { fontWeight: 500, color: 'var(--dsw-alias-label-primary)', fontFamily: 'var(--dsw-font-family-code)', fontSize: '13px' } },
+      { key: 'name', style: { fontWeight: 500, color: 'var(--dgw-text)', fontFamily: 'var(--dsw-font-family-code)', fontSize: 'var(--dgw-font-lg)' } },
       branch.name || 'detached',
     ),
   )
   const aheadBehind = []
-  if (branch.ahead > 0) aheadBehind.push(React.createElement(Stat, { key: 'a', text: `↑${branch.ahead}`, color: 'var(--dsw-alias-state-success-primary)' }))
-  if (branch.behind > 0) aheadBehind.push(React.createElement(Stat, { key: 'b', text: `↓${branch.behind}`, color: 'var(--dsw-alias-state-error-primary)' }))
+  if (branch.ahead > 0) aheadBehind.push(React.createElement(Stat, { key: 'a', text: `↑${branch.ahead}`, color: 'var(--dgw-success)' }))
+  if (branch.behind > 0) aheadBehind.push(React.createElement(Stat, { key: 'b', text: `↓${branch.behind}`, color: 'var(--dgw-error)' }))
   if (aheadBehind.length) parts.push(React.createElement('span', { key: 'ab', style: { display: 'inline-flex', gap: '6px' } }, aheadBehind))
   if (branch.upstream) parts.push(React.createElement(Muted, { key: 'up' }, '→ ' + branch.upstream))
   return React.createElement(
@@ -40,15 +40,15 @@ function ChangesLine({ changes, clean }) {
   if (clean) {
     return React.createElement(
       Text,
-      { style: { color: 'var(--dsw-alias-state-success-primary)' } },
+      { style: { color: 'var(--dgw-success)' } },
       '✓ Clean — working tree is clean',
     )
   }
   const chips = []
   if (changes.modified) chips.push(React.createElement(Stat, { key: 'm', text: `${changes.modified} modified` }))
-  if (changes.staged) chips.push(React.createElement(Stat, { key: 's', text: `${changes.staged} staged`, color: 'var(--dsw-alias-state-success-primary)' }))
+  if (changes.staged) chips.push(React.createElement(Stat, { key: 's', text: `${changes.staged} staged`, color: 'var(--dgw-success)' }))
   if (changes.untracked) chips.push(React.createElement(Stat, { key: 'u', text: `${changes.untracked} untracked` }))
-  if (changes.deleted) chips.push(React.createElement(Stat, { key: 'd', text: `${changes.deleted} deleted`, color: 'var(--dsw-alias-state-error-primary)' }))
+  if (changes.deleted) chips.push(React.createElement(Stat, { key: 'd', text: `${changes.deleted} deleted`, color: 'var(--dgw-error)' }))
   if (!chips.length && !clean) chips.push(React.createElement(Muted, { key: 'n' }, 'working tree has changes'))
   return React.createElement('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap' } }, chips)
 }
@@ -61,7 +61,7 @@ function PrLine({ pr }) {
     React.createElement(Pill, { text: (pr.state || 'OPEN').toUpperCase() + (pr.draft ? ' · DRAFT' : '') }),
     React.createElement(
       'a',
-      { href: pr.url, target: '_blank', rel: 'noreferrer', className: 'dgw-link', style: { color: 'var(--dsw-alias-brand-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+      { href: pr.url, target: '_blank', rel: 'noreferrer', className: 'dgw-link', style: { color: 'var(--dgw-accent)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
       `PR #${pr.number} · ${pr.title}`,
     ),
   )
@@ -91,7 +91,7 @@ function CiLine({ ci }) {
 export function GitWorkspaceRow({ block }) {
   const meta = blockMeta(block)
   if (!meta) {
-    return React.createElement(Card, { header: React.createElement(React.Fragment, null, React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Git Workspace'), React.createElement(Muted, null, '—')), children: null })
+    return React.createElement(Card, { header: React.createElement(React.Fragment, null, React.createElement('span', { style: { color: 'var(--dgw-text-2)' } }, 'Git Workspace'), React.createElement(Muted, null, '—')), children: null })
   }
   const header = React.createElement(
     React.Fragment,

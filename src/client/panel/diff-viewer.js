@@ -1,18 +1,19 @@
 import * as React from 'react'
-import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
-import { IconCloseFill14 } from '../icons.js'
-import { Code, Muted, IconBtn, ConfirmButton, ensureStyles } from '../components.js'
+import { IconCloseFill14, Icon } from '../icons.js'
+import { IconBtn, ConfirmButton, PathLabel, ensureStyles } from '../components.js'
 
 const STATUS_LETTER = {
-  modified: { text: 'M', color: 'var(--dsw-alias-state-warn-primary)' },
-  added: { text: 'A', color: 'var(--dsw-alias-state-success-primary)' },
-  deleted: { text: 'D', color: 'var(--dsw-alias-state-error-primary)' },
-  renamed: { text: 'R', color: 'var(--dsw-alias-label-secondary)' },
-  copied: { text: 'C', color: 'var(--dsw-alias-state-success-primary)' },
-  untracked: { text: 'U', color: 'var(--dsw-alias-label-secondary)' },
+  modified: { text: 'M', color: 'var(--dgw-warn-strong)' },
+  added: { text: 'A', color: 'var(--dgw-success-strong)' },
+  deleted: { text: 'D', color: 'var(--dgw-error-strong)' },
+  renamed: { text: 'R', color: 'var(--dgw-text-2)' },
+  copied: { text: 'C', color: 'var(--dgw-success-strong)' },
+  untracked: { text: 'U', color: 'var(--dgw-text-2)' },
 }
 
-const MAX_RENDERED_LINES = 1500
+const ROW_H = 24
+const OVERSCAN = 10
+const MAX_BODY_H = 360
 
 function fmtNum(n) {
   return n >= 1000 ? n.toLocaleString('en-US') : String(n)
@@ -32,74 +33,32 @@ function withNumbers(hunk) {
   return out
 }
 
-function diffLineBg(type) {
-  return type === 'add'
-    ? 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 13%, transparent)'
-    : type === 'del'
-      ? 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 11%, transparent)'
-      : undefined
+function lineClass(type) {
+  if (type === 'add') return ' dgw-diff-line--add'
+  if (type === 'del') return ' dgw-diff-line--del'
+  if (type === 'meta') return ' dgw-diff-line--meta'
+  return ''
 }
 
-function diffSignColor(type) {
-  return type === 'add'
-    ? 'var(--dsw-alias-state-success-primary)'
-    : type === 'del'
-      ? 'var(--dsw-alias-state-error-primary)'
-      : 'transparent'
+function diffSign(type) {
+  return type === 'add' ? '+' : type === 'del' ? '-' : ' '
 }
 
 function DiffLine({ line }) {
   return React.createElement(
     'div',
-    { className: 'dgw-diff-line', style: diffLineBg(line.type) ? { background: diffLineBg(line.type) } : undefined },
+    { className: `dgw-diff-line${lineClass(line.type)}` },
     React.createElement('span', { className: 'dgw-diff-gutter' }, line.old != null ? String(line.old) : ''),
     React.createElement('span', { className: 'dgw-diff-gutter' }, line.new != null ? String(line.new) : ''),
-    React.createElement(
-      'span',
-      { className: 'dgw-diff-sign', style: { flex: 'none', width: '10px', color: diffSignColor(line.type) } },
-      line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ',
-    ),
+    React.createElement('span', { className: 'dgw-diff-sign' }, diffSign(line.type)),
     React.createElement('code', { className: 'dgw-diff-text' }, line.text),
-  )
-}
-
-function DiffHunksUnified({ hunks, file, onHunkAction }) {
-  let rendered = 0
-  const blocks = []
-  for (const hunk of hunks) {
-    const lines = withNumbers(hunk)
-    blocks.push(
-      React.createElement(
-        'div',
-        { key: `${hunk.oldStart}:${hunk.newStart}`, className: 'dgw-diff-hunk' },
-        React.createElement(
-          'div',
-          { className: 'dgw-diff-hunkhead' },
-          React.createElement('span', null, `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`),
-          React.createElement(HunkActions, { file, hunk, onHunkAction }),
-        ),
-        lines.map((l, i) => {
-          rendered++
-          return rendered <= MAX_RENDERED_LINES ? React.createElement(DiffLine, { key: i, line: l }) : null
-        }),
-      ),
-    )
-  }
-  return React.createElement(
-    React.Fragment,
-    null,
-    blocks,
-    rendered > MAX_RENDERED_LINES
-      ? React.createElement('div', { style: { padding: '4px 8px' } }, React.createElement(Muted, null, `+${rendered - MAX_RENDERED_LINES} more lines not shown.`))
-      : null,
   )
 }
 
 // Pairs a hunk's flat line list into left/right rows for the split layout:
 // context (and `\ No newline` meta) lines mirror onto both sides at once,
 // while a run of deletions is zipped against the run of additions that
-// follows it — same as GitHub/most diff tools — so a pure replace lines up
-// side by side instead of stacking all removals above all additions.
+// follows it, so a pure replace lines up side by side.
 function pairHunkRows(lines) {
   const rows = []
   let i = 0
@@ -139,105 +98,11 @@ function SplitDiffLine({ line, side }) {
   const num = side === 'left' ? line.old : line.new
   return React.createElement(
     'div',
-    { className: 'dgw-diff-line', style: diffLineBg(line.type) ? { background: diffLineBg(line.type) } : undefined },
+    { className: `dgw-diff-line${lineClass(line.type)}` },
     React.createElement('span', { className: 'dgw-diff-gutter' }, num != null ? String(num) : ''),
-    React.createElement(
-      'span',
-      { className: 'dgw-diff-sign', style: { flex: 'none', width: '10px', color: diffSignColor(line.type) } },
-      line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ',
-    ),
+    React.createElement('span', { className: 'dgw-diff-sign' }, diffSign(line.type)),
     React.createElement('code', { className: 'dgw-diff-text' }, line.text),
   )
-}
-
-function DiffHunksSplit({ hunks, file, onHunkAction }) {
-  let renderedRows = 0
-  const blocks = []
-  for (const hunk of hunks) {
-    const rows = pairHunkRows(withNumbers(hunk))
-    const visible = rows.slice(0, Math.max(0, MAX_RENDERED_LINES - renderedRows))
-    renderedRows += rows.length
-    blocks.push(
-      React.createElement(
-        'div',
-        { key: `${hunk.oldStart}:${hunk.newStart}`, className: 'dgw-diff-hunk' },
-        React.createElement(
-          'div',
-          { className: 'dgw-diff-hunkhead' },
-          React.createElement('span', null, `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`),
-          React.createElement(HunkActions, { file, hunk, onHunkAction }),
-        ),
-        React.createElement(
-          'div',
-          { className: 'dgw-diff-splitpane' },
-          React.createElement(
-            'div',
-            { className: 'dgw-diff-splitcol' },
-            visible.map((r, i) => React.createElement(SplitDiffLine, { key: i, line: r.left, side: 'left' })),
-          ),
-          React.createElement(
-            'div',
-            { className: 'dgw-diff-splitcol' },
-            visible.map((r, i) => React.createElement(SplitDiffLine, { key: i, line: r.right, side: 'right' })),
-          ),
-        ),
-      ),
-    )
-  }
-  return React.createElement(
-    React.Fragment,
-    null,
-    blocks,
-    renderedRows > MAX_RENDERED_LINES
-      ? React.createElement('div', { style: { padding: '4px 8px' } }, React.createElement(Muted, null, `+${renderedRows - MAX_RENDERED_LINES} more lines not shown.`))
-      : null,
-  )
-}
-
-function StatSpan({ additions, deletions }) {
-  return React.createElement(
-    'span',
-    { style: { display: 'inline-flex', gap: '6px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px' } },
-    React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)' } }, `+${fmtNum(additions || 0)}`),
-    React.createElement('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, `-${fmtNum(deletions || 0)}`),
-  )
-}
-
-// A two-option pill, same visual language as the tree's Tree/List toggle —
-// switches the hunk body between one unified column and a left/right split.
-function DiffModeToggle({ mode, onChange }) {
-  const btn = (id, label) =>
-    React.createElement(
-      'span',
-      {
-        key: id,
-        role: 'button',
-        tabIndex: 0,
-        'aria-pressed': mode === id,
-        title: `${label} view`,
-        onClick: () => onChange(id),
-        onKeyDown: (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            onChange(id)
-          }
-        },
-        style: {
-          display: 'inline-flex',
-          alignItems: 'center',
-          padding: '2px 8px',
-          borderRadius: '5px',
-          fontSize: '10px',
-          fontWeight: 600,
-          cursor: 'pointer',
-          fontFamily: 'var(--dsw-font-family)',
-          background: mode === id ? 'var(--dsw-alias-interactive-bg-hover-solid)' : 'none',
-          color: mode === id ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-caption)',
-        },
-      },
-      label,
-    )
-  return React.createElement('span', { style: { display: 'inline-flex', gap: '2px', flex: 'none' } }, btn('unified', 'Unified'), btn('split', 'Split'))
 }
 
 function hunkTarget(hunk) {
@@ -288,6 +153,154 @@ function HunkActions({ file, hunk, onHunkAction }) {
   )
 }
 
+function HunkHeader({ file, hunk, onHunkAction }) {
+  return React.createElement(
+    'div',
+    { className: 'dgw-diff-hunkhead' },
+    React.createElement('span', null, `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`),
+    React.createElement(HunkActions, { file, hunk, onHunkAction }),
+  )
+}
+
+function buildRows(mode, hunks) {
+  const rows = []
+  for (const hunk of hunks) {
+    rows.push({ kind: 'hunk', hunk, key: `h:${hunk.oldStart}:${hunk.newStart}` })
+    if (mode === 'split') {
+      const pairs = pairHunkRows(withNumbers(hunk))
+      pairs.forEach((pair, i) => rows.push({ kind: 'split', pair, key: `s:${hunk.oldStart}:${i}` }))
+    } else {
+      withNumbers(hunk).forEach((line, i) => rows.push({ kind: 'line', line, key: `l:${hunk.oldStart}:${i}` }))
+    }
+  }
+  return rows
+}
+
+function DiffBody({ file, hunks, mode, onHunkAction }) {
+  const bodyRef = React.useRef(null)
+  const [scrollTop, setScrollTop] = React.useState(0)
+  const [viewportH, setViewportH] = React.useState(MAX_BODY_H)
+  const rows = React.useMemo(() => buildRows(mode, hunks), [mode, hunks])
+  const totalH = rows.length * ROW_H
+  const height = Math.min(MAX_BODY_H, Math.max(ROW_H, totalH))
+
+  React.useEffect(() => {
+    const el = bodyRef.current
+    if (el) el.scrollTop = 0
+    setScrollTop(0)
+  }, [mode, file.path])
+
+  React.useEffect(() => {
+    const el = bodyRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver((entries) => {
+      const next = entries[0] && entries[0].contentRect ? entries[0].contentRect.height : 0
+      if (next > 0) setViewportH(next)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN)
+  const end = Math.min(rows.length, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN)
+  const visible = rows.slice(start, end)
+  return React.createElement(
+    'div',
+    {
+      ref: bodyRef,
+      className: 'dgw-diff-body',
+      style: { height: `${height}px` },
+      onScroll: (e) => setScrollTop(e.currentTarget.scrollTop),
+    },
+    React.createElement('div', {
+      className: 'dgw-diff-spacer',
+      style: { height: `${start * ROW_H}px` },
+      'aria-hidden': 'true',
+    }),
+    visible.map((row) => {
+      if (row.kind === 'hunk') {
+        return React.createElement(HunkHeader, { key: row.key, file, hunk: row.hunk, onHunkAction })
+      }
+      if (row.kind === 'split') {
+        return React.createElement(
+          'div',
+          { key: row.key, className: 'dgw-diff-splitpane' },
+          React.createElement(
+            'div',
+            { className: 'dgw-diff-splitcol' },
+            React.createElement(SplitDiffLine, { line: row.pair.left, side: 'left' }),
+          ),
+          React.createElement(
+            'div',
+            { className: 'dgw-diff-splitcol' },
+            React.createElement(SplitDiffLine, { line: row.pair.right, side: 'right' }),
+          ),
+        )
+      }
+      return React.createElement(DiffLine, { key: row.key, line: row.line })
+    }),
+    React.createElement('div', {
+      className: 'dgw-diff-spacer',
+      style: { height: `${(rows.length - end) * ROW_H}px` },
+      'aria-hidden': 'true',
+    }),
+  )
+}
+
+function StatSpan({ additions, deletions }) {
+  return React.createElement(
+    'span',
+    { className: 'dgw-stats' },
+    React.createElement('span', { className: 'dgw-stats__add' }, `+${fmtNum(additions || 0)}`),
+    React.createElement('span', { className: 'dgw-stats__del' }, `-${fmtNum(deletions || 0)}`),
+  )
+}
+
+function DiffModeToggle({ mode, onChange }) {
+  const btn = (id, label) =>
+    React.createElement(
+      'span',
+      {
+        key: id,
+        role: 'button',
+        tabIndex: 0,
+        'aria-pressed': mode === id,
+        title: `${label} view`,
+        className: 'dgw-segmented__btn',
+        'data-active': String(mode === id),
+        onClick: () => onChange(id),
+        onKeyDown: (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onChange(id)
+          }
+        },
+      },
+      label,
+    )
+  return React.createElement(
+    'span',
+    { className: 'dgw-segmented', role: 'group', 'aria-label': 'Diff layout' },
+    btn('unified', 'Unified'),
+    btn('split', 'Split'),
+  )
+}
+
+function DiffNotice({ icon, title, hint, action }) {
+  return React.createElement(
+    'div',
+    { className: 'dgw-empty dgw-empty--compact' },
+    React.createElement(
+      'span',
+      { className: 'dgw-empty__icon' },
+      React.createElement(Icon, { name: icon, size: 18 }),
+    ),
+    React.createElement('span', { className: 'dgw-empty__title' }, title),
+    hint ? React.createElement('span', { className: 'dgw-empty__hint' }, hint) : null,
+    action || null,
+  )
+}
+
 export function DiffViewer({
   file,
   onClose,
@@ -317,15 +330,11 @@ export function DiffViewer({
     React.createElement(
       'div',
       { className: 'dgw-diff-head' },
+      React.createElement('span', { className: 'dgw-statuschip', style: { color: c.color }, title: file.status }, c.text),
       React.createElement(
-        'span',
-        { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', fontWeight: 600, color: c.color, flex: 'none' } },
-        c.text,
-      ),
-      React.createElement(
-        Code,
-        { style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } },
-        file.oldPath ? `${file.oldPath} → ${file.path}` : file.path,
+        'div',
+        { className: 'dgw-diff-head__path' },
+        React.createElement(PathLabel, { path: file.path, prefix: file.oldPath ? `${file.oldPath} → ` : '' }),
       ),
       React.createElement(StatSpan, { additions: file.additions, deletions: file.deletions }),
       hunks.length > 0 ? React.createElement(DiffModeToggle, { mode, onChange: setMode }) : null,
@@ -333,32 +342,34 @@ export function DiffViewer({
         ? React.createElement(
             IconBtn,
             { label: 'Close diff', side: 'bottom', onClick: onClose },
-            React.createElement(IconCloseFill14, { size: 12 }),
+            React.createElement(IconCloseFill14, { size: 14 }),
           )
         : null,
     ),
     binary
-      ? React.createElement(
-          'div',
-          { style: { padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } },
-          React.createElement(Muted, null, 'Binary file — no textual diff.'),
-          onAskFull ? React.createElement(Button, { variant: 'outline', size: 'sm', onClick: askFull }, 'Fetch full diff') : null,
-        )
+      ? React.createElement(DiffNotice, {
+          icon: 'file',
+          title: 'Binary file',
+          hint: 'No textual diff to render.',
+          action: onAskFull
+            ? React.createElement('button', { type: 'button', className: 'dgw-stagebtn dgw-empty__action', onClick: askFull, style: { width: 'auto' } }, 'Fetch full diff')
+            : null,
+        })
       : oversize
-        ? React.createElement(
-            'div',
-            { style: { padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } },
-            React.createElement(Muted, null, 'Diff too large for inline preview.'),
-            onAskFull ? React.createElement(Button, { variant: 'outline', size: 'sm', onClick: askFull }, 'Fetch full diff') : null,
-          )
+        ? React.createElement(DiffNotice, {
+            icon: 'warning',
+            title: 'Diff too large',
+            hint: 'The inline preview is limited for this file.',
+            action: onAskFull
+              ? React.createElement('button', { type: 'button', className: 'dgw-stagebtn dgw-empty__action', onClick: askFull, style: { width: 'auto' } }, 'Fetch full diff')
+              : null,
+          })
         : hunks.length === 0
-          ? React.createElement('div', { style: { padding: '8px' } }, React.createElement(Muted, null, 'No textual changes.'))
-          : React.createElement(
-              'div',
-              { className: 'dgw-diff-body' },
-              mode === 'split'
-                ? React.createElement(DiffHunksSplit, { hunks, file, onHunkAction })
-                : React.createElement(DiffHunksUnified, { hunks, file, onHunkAction }),
-            ),
+          ? React.createElement(DiffNotice, {
+              icon: 'file',
+              title: 'No textual changes',
+              hint: 'This file has no renderable hunks.',
+            })
+          : React.createElement(DiffBody, { file, hunks, mode, onHunkAction }),
   )
 }

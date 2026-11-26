@@ -22,7 +22,7 @@ export function PrRow({ block }) {
         React.createElement(Pill, { text: (pr.state || 'open').toUpperCase() + (pr.draft ? ' · DRAFT' : '') }),
         React.createElement(
           'a',
-          { href: pr.url, target: '_blank', rel: 'noreferrer', className: 'dgw-link', style: { color: 'var(--dsw-alias-brand-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+          { href: pr.url, target: '_blank', rel: 'noreferrer', className: 'dgw-link', style: { color: 'var(--dgw-accent)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
           `#${pr.number} ${(pr.title || '').split('\n')[0]}`,
         ),
       ),

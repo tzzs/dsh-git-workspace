@@ -37,10 +37,10 @@ export function StatusRow({ block }) {
         { key: f.path + i, className: 'dgw-row' },
         React.createElement(
           'span',
-          { style: { width: '14px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', color: f.staged ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-label-secondary)', textAlign: 'center' } },
+          { style: { width: '14px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: 'var(--dgw-font-md)', color: f.staged ? 'var(--dgw-success)' : 'var(--dgw-text-2)', textAlign: 'center' } },
           statusLetter(f.status),
         ),
-        React.createElement('span', { title: f.path, style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', color: 'var(--dsw-alias-label-primary)' } }, f.path),
+        React.createElement('span', { title: f.path, style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', fontFamily: 'var(--dsw-font-family-code)', fontSize: 'var(--dgw-font-md)', color: 'var(--dgw-text)' } }, f.path),
         React.createElement(CopyBtn, { text: f.path, label: 'Copy path' }),
       ),
     ),

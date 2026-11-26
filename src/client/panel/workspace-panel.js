@@ -1,5 +1,6 @@
 import * as React from 'react'
 import {
+  Icon,
   IconBranchOutline16,
   IconCheckOutline14,
   IconChevronRightOutline14,
@@ -11,7 +12,6 @@ import {
   IconRightUpOutline16,
   IconWarningOutline16,
 } from '../icons.js'
-import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   Row,
   Code,
@@ -24,6 +24,8 @@ import {
   Section,
   DropdownMenu,
   ConfirmButton,
+  Tooltip,
+  PathLabel,
   checkDotState,
 } from '../components.js'
 import { DiffViewer } from './diff-viewer.js'
@@ -35,28 +37,22 @@ const COMMANDS_UNSUPPORTED_HINT =
   'This host has no native command channel — Git write actions are disabled.'
 
 const STATUS_LETTER = {
-  modified: { text: 'M', color: 'var(--dsw-alias-state-warn-primary)' },
-  added: { text: 'A', color: 'var(--dsw-alias-state-success-primary)' },
-  deleted: { text: 'D', color: 'var(--dsw-alias-state-error-primary)' },
-  renamed: { text: 'R', color: 'var(--dsw-alias-label-secondary)' },
-  copied: { text: 'C', color: 'var(--dsw-alias-state-success-primary)' },
-  untracked: { text: 'U', color: 'var(--dsw-alias-label-secondary)' },
+  modified: { text: 'M', color: 'var(--dgw-warn-strong)' },
+  added: { text: 'A', color: 'var(--dgw-success-strong)' },
+  deleted: { text: 'D', color: 'var(--dgw-error-strong)' },
+  renamed: { text: 'R', color: 'var(--dgw-text-2)' },
+  copied: { text: 'C', color: 'var(--dgw-success-strong)' },
+  untracked: { text: 'U', color: 'var(--dgw-text-2)' },
 }
 
 function StatusChip({ status }) {
-  const c = STATUS_LETTER[status] || { text: '?', color: 'var(--dsw-alias-label-secondary)' }
+  const c = STATUS_LETTER[status] || { text: '?', color: 'var(--dgw-text-2)' }
   return React.createElement(
     'span',
     {
-      style: {
-        fontFamily: 'var(--dsw-font-family-code)',
-        fontSize: '11px',
-        fontWeight: 500,
-        color: c.color,
-        width: '12px',
-        flex: 'none',
-        textAlign: 'center',
-      },
+      className: 'dgw-statuschip',
+      style: { color: c.color },
+      title: status,
     },
     c.text,
   )
@@ -86,30 +82,13 @@ function repoWebUrl(remote) {
   return m ? `https://${m[1]}/${m[2].replace(/\.git$/, '')}` : null
 }
 
-// Small inline icons kept local (rather than imported) so their exact size
-// stays in sync with the 11px text they sit next to — the host icon set
-// only ships fixed 13/14/16px glyphs, which read as oversized here.
+// Small directional glyph used by branch/upstream rows.
 function ArrowIcon({ size = 10 }) {
-  return React.createElement(
-    'svg',
-    { width: size, height: size, viewBox: '0 0 16 16', fill: 'none', style: { flex: 'none', display: 'inline-block' } },
-    React.createElement('path', {
-      d: 'M2.5 8h10.5m0 0L9.5 4.5M13 8l-3.5 3.5',
-      stroke: 'currentColor',
-      strokeWidth: 1.6,
-      strokeLinecap: 'round',
-      strokeLinejoin: 'round',
-    }),
-  )
+  return React.createElement(Icon, { name: 'arrowRight', size, style: { transform: 'scale(.72)' } })
 }
 
-function SearchIcon({ size = 13 }) {
-  return React.createElement(
-    'svg',
-    { width: size, height: size, viewBox: '0 0 16 16', fill: 'none', style: { flex: 'none', display: 'inline-block' } },
-    React.createElement('circle', { cx: 7, cy: 7, r: 4.25, stroke: 'currentColor', strokeWidth: 1.4 }),
-    React.createElement('path', { d: 'M10.4 10.4 14 14', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round' }),
-  )
+function SearchIcon({ size = 14 }) {
+  return React.createElement(Icon, { name: 'search', size })
 }
 
 // A button-shaped control that is safe to nest inside `Section`'s header
@@ -142,13 +121,13 @@ function IconActionBtn({ title, onClick, tone, elRef, children }) {
 }
 
 function prStateColor(pr) {
-  if (!pr) return 'var(--dsw-alias-label-secondary)'
-  if (pr.draft) return 'var(--dsw-alias-state-warn-primary)'
-  if (pr.merged) return 'var(--dsw-alias-label-secondary)'
+  if (!pr) return 'var(--dgw-text-2)'
+  if (pr.draft) return 'var(--dgw-warn-strong)'
+  if (pr.merged) return 'var(--dgw-text-2)'
   const s = String(pr.state || '').toLowerCase()
-  if (s === 'open') return 'var(--dsw-alias-state-success-primary)'
-  if (s === 'closed') return 'var(--dsw-alias-state-error-primary)'
-  return 'var(--dsw-alias-label-secondary)'
+  if (s === 'open') return 'var(--dgw-success-strong)'
+  if (s === 'closed') return 'var(--dgw-error-strong)'
+  return 'var(--dgw-text-2)'
 }
 
 function prStateLabel(pr) {
@@ -161,9 +140,9 @@ function FileStats({ additions, deletions }) {
   if (!additions && !deletions) return null
   return React.createElement(
     'span',
-    { style: { display: 'inline-flex', gap: '6px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px' } },
-    React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', minWidth: '22px', textAlign: 'right' } }, `+${fmtNum(additions || 0)}`),
-    React.createElement('span', { style: { color: 'var(--dsw-alias-state-error-primary)', minWidth: '22px', textAlign: 'right' } }, `-${fmtNum(deletions || 0)}`),
+    { className: 'dgw-stats', 'aria-label': `${additions || 0} additions, ${deletions || 0} deletions` },
+    React.createElement('span', { className: 'dgw-stats__add' }, `+${fmtNum(additions || 0)}`),
+    React.createElement('span', { className: 'dgw-stats__del' }, `-${fmtNum(deletions || 0)}`),
   )
 }
 
@@ -245,25 +224,25 @@ function DirNode({ dir, depth, open, onToggle, treeProps }) {
           }
         },
         'aria-expanded': open,
-        style: { padding: `1px 6px 1px ${depth * 12 + 2}px`, lineHeight: '15px' },
+        style: { '--dgw-depth': depth },
       },
       React.createElement(
         'span',
         { className: 'dgw-chevron', 'data-open': String(open) },
-        React.createElement(IconChevronRightOutline14, { size: 12 }),
+        React.createElement(IconChevronRightOutline14, { size: 14 }),
       ),
       React.createElement(
         'span',
-        { style: { display: 'inline-flex', color: 'var(--dsw-alias-label-caption)', flex: 'none' } },
-        React.createElement(IconFolderOpenOutline16, { size: 13 }),
+        { style: { display: 'inline-flex', color: 'var(--dgw-text-3)', flex: 'none' } },
+        React.createElement(IconFolderOpenOutline16, { size: 14 }),
       ),
       React.createElement(
         'span',
-        { style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' } },
+        { className: 'dgw-treelabel' },
         dir.name,
       ),
-      React.createElement(Muted, null, String(treeSize(dir))),
-      React.createElement('span', { style: { flex: '1 1 auto' } }),
+      React.createElement('span', { className: 'dgw-treecount' }, String(treeSize(dir))),
+      React.createElement('span', { className: 'dgw-spacer' }),
       treeProps.onDispatch ? stageDiscardActions(collectDirFiles(dir), treeProps.onDispatch, DIR_STAGE_LABELS) : null,
     ),
     open ? React.createElement(TreeNodeRows, { node: dir, depth: depth + 1, treeProps }) : null,
@@ -287,7 +266,7 @@ function FileTree({ files, group = 'changes', onDispatch, viewMode = 'tree', sel
     const sorted = [...files].sort((a, b) => a.path.localeCompare(b.path))
     return React.createElement(
       'div',
-      { style: { display: 'flex', flexDirection: 'column' } },
+      { className: 'dgw-tree' },
       sorted.map((f) =>
         React.createElement(FileTreeRow, {
           key: fileKey(group, f),
@@ -300,11 +279,15 @@ function FileTree({ files, group = 'changes', onDispatch, viewMode = 'tree', sel
   }
   const tree = buildTree(files)
   for (const child of tree.dirs.values()) compactDir(child)
-  return React.createElement(TreeNodeRows, { node: tree, depth: 0, treeProps })
+  return React.createElement(
+    'div',
+    { className: 'dgw-tree' },
+    React.createElement(TreeNodeRows, { node: tree, depth: 0, treeProps }),
+  )
 }
 
 function ViewModeToggle({ mode, onChange }) {
-  const btn = (id, label) =>
+  const btn = (id, label, icon) =>
     React.createElement(
       'span',
       {
@@ -313,6 +296,8 @@ function ViewModeToggle({ mode, onChange }) {
         tabIndex: 0,
         'aria-pressed': mode === id,
         title: `${label} view`,
+        'data-active': String(mode === id),
+        className: 'dgw-segmented__btn',
         onClick: (e) => {
           e.stopPropagation()
           onChange(id)
@@ -324,22 +309,16 @@ function ViewModeToggle({ mode, onChange }) {
             onChange(id)
           }
         },
-        style: {
-          display: 'inline-flex',
-          alignItems: 'center',
-          padding: '2px 8px',
-          borderRadius: '5px',
-          fontSize: '10px',
-          fontWeight: 600,
-          cursor: 'pointer',
-          fontFamily: 'var(--dsw-font-family)',
-          background: mode === id ? 'var(--dsw-alias-interactive-bg-hover-solid)' : 'none',
-          color: mode === id ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-caption)',
-        },
       },
-      label,
+      React.createElement(Icon, { name: icon, size: 14 }),
+      React.createElement('span', { className: 'dgw-segmented__label' }, label),
     )
-  return React.createElement('span', { style: { display: 'inline-flex', gap: '2px', flex: 'none' } }, btn('tree', 'Tree'), btn('list', 'List'))
+  return React.createElement(
+    'span',
+    { className: 'dgw-segmented', role: 'group', 'aria-label': 'File view mode' },
+    btn('tree', 'Tree', 'tree'),
+    btn('list', 'List', 'list'),
+  )
 }
 
 // A "…" overflow menu for the Graph section: lets a commit's expanded file
@@ -496,7 +475,7 @@ function hoverConfirmBtn(label, confirmLabel, onConfirm, Icon) {
           onConfirm,
           confirmChildren: React.createElement(
             'span',
-            { style: { fontSize: '11px', fontWeight: 700, color: 'var(--dsw-alias-state-error-primary)' } },
+            { style: { fontSize: 'var(--dgw-font-sm)', fontWeight: 700, color: 'var(--dgw-error)' } },
             '!',
           ),
         },
@@ -537,7 +516,7 @@ const FILE_STAGE_LABELS = { discard: 'Discard changes to this file', stage: 'Sta
 const DIR_STAGE_LABELS = { discard: 'Discard folder', stage: 'Stage folder', unstage: 'Unstage folder' }
 
 function fileIconColor(status) {
-  return (STATUS_LETTER[status] && STATUS_LETTER[status].color) || 'var(--dsw-alias-label-caption)'
+  return (STATUS_LETTER[status] && STATUS_LETTER[status].color) || 'var(--dgw-text-3)'
 }
 
 // File rows have no chevron: clicking a patch-backed row opens its diff
@@ -550,21 +529,25 @@ function FileTreeRow({ file, depth, treeProps }) {
   const key = fileKey(group, file)
   const clickable = hasPatch(file) && typeof onSelect === 'function'
   const isActive = clickable && selectedKey === key
-  const rowStyle = { padding: `1px 6px 1px ${depth * 12 + 2 + DIR_ICON_INSET}px`, gap: '5px', lineHeight: '15px' }
+  const rowStyle = { '--dgw-depth': depth }
   const rowChildren = [
     React.createElement(
       'span',
-      { key: 'icon', style: { display: 'inline-flex', color: fileIconColor(file.status), flex: 'none' } },
-      React.createElement(IconCodeOutline16, { size: 13 }),
+      { key: 'icon', className: 'dgw-fileicon', style: { color: fileIconColor(file.status) } },
+      React.createElement(IconCodeOutline16, { size: 14 }),
     ),
-    React.createElement(Code, { key: 'name', style: { fontSize: '11.5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } }, file.name),
+    React.createElement(
+      'span',
+      { key: 'name', className: 'dgw-treelabel', title: file.path },
+      file.name.includes('/') ? React.createElement(PathLabel, { path: file.name }) : file.name,
+    ),
     React.createElement(FileStats, { key: 'stats', additions: file.additions, deletions: file.deletions }),
     React.createElement(StatusChip, { key: 'status', status: file.status }),
     React.createElement('span', { key: 'stage-actions' }, stageDiscardActions([file], onDispatch, FILE_STAGE_LABELS)),
   ]
   let row
   if (!clickable) {
-    row = React.createElement(Row, { className: 'dgw-row', style: rowStyle }, ...rowChildren)
+    row = React.createElement('div', { className: 'dgw-row dgw-filebtn dgw-static', style: rowStyle }, ...rowChildren)
   } else {
     const open = () => onSelect(key)
     row = React.createElement(
@@ -573,7 +556,7 @@ function FileTreeRow({ file, depth, treeProps }) {
         className: 'dgw-row dgw-filebtn',
         role: 'button',
         tabIndex: 0,
-        title: 'View diff',
+        title: `View diff of ${file.path}`,
         onClick: open,
         onKeyDown: (e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -637,21 +620,21 @@ function BranchHeader({ data, refreshing, onOpenPr, searchOpen, onToggleSearch, 
               href: '#pr',
               onClick: (e) => { e.preventDefault(); onOpenPr && onOpenPr() },
               className: 'dgw-link',
-              style: { display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--dsw-alias-label-primary)', minWidth: 0 },
+              style: { display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--dgw-text)', minWidth: 0 },
             },
             React.createElement(
               'span',
               { style: { display: 'inline-flex', color: prStateColor(pr), flex: 'none' }, title: prStateLabel(pr) },
               React.createElement(IconBranchOutline16, { size: 12 }),
             ),
-            React.createElement('span', { style: { fontSize: '11px', fontWeight: 600 } }, `PR #${pr.number}`),
+            React.createElement('span', { style: { fontSize: 'var(--dgw-font-sm)', fontWeight: 600 } }, `PR #${pr.number}`),
           )
         : null,
       React.createElement('span', { style: { flex: '1 1 auto' } }),
       onToggleSearch
         ? React.createElement(
             IconActionBtn,
-            { title: searchOpen ? 'Close search' : 'Search files', onClick: onToggleSearch, tone: searchOpen ? 'var(--dsw-alias-brand-primary)' : undefined },
+            { title: searchOpen ? 'Close search' : 'Search files', onClick: onToggleSearch, tone: searchOpen ? 'var(--dgw-accent)' : undefined },
             React.createElement(SearchIcon, { size: 13 }),
           )
         : null,
@@ -673,11 +656,11 @@ function BranchHeader({ data, refreshing, onOpenPr, searchOpen, onToggleSearch, 
     React.createElement(
       'div',
       { style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '18px' } },
-      React.createElement(Code, { style: { fontSize: '13px', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, branch.name || 'detached'),
+      React.createElement(Code, { style: { fontSize: 'var(--dgw-font-lg)', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, branch.name || 'detached'),
       branch.upstream
         ? React.createElement(
             'span',
-            { style: { display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--dsw-alias-label-caption)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            { style: { display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: 'var(--dgw-font-sm)', color: 'var(--dgw-text-3)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
             React.createElement(ArrowIcon, { size: 9 }),
             branch.upstream,
           )
@@ -686,9 +669,9 @@ function BranchHeader({ data, refreshing, onOpenPr, searchOpen, onToggleSearch, 
       totalA != null && (totalA > 0 || totalD > 0)
         ? React.createElement(
             'span',
-            { style: { display: 'inline-flex', gap: '6px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px' } },
-            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)' } }, `+${fmtNum(totalA)}`),
-            React.createElement('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, `-${fmtNum(totalD)}`),
+            { style: { display: 'inline-flex', gap: '6px', flex: 'none', fontFamily: 'var(--dsw-font-family-code)', fontSize: 'var(--dgw-font-sm)' } },
+            React.createElement('span', { style: { color: 'var(--dgw-success)' } }, `+${fmtNum(totalA)}`),
+            React.createElement('span', { style: { color: 'var(--dgw-error)' } }, `-${fmtNum(totalD)}`),
           )
         : null,
     ),
@@ -698,17 +681,17 @@ function BranchHeader({ data, refreshing, onOpenPr, searchOpen, onToggleSearch, 
       compareTarget
         ? React.createElement(
             'span',
-            { style: { display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            { style: { display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: 'var(--dgw-font-sm)', color: 'var(--dgw-text-2)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
             React.createElement(ArrowIcon, { size: 9 }),
             compareTarget,
           )
-        : React.createElement('span', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' } }, 'no upstream'),
+        : React.createElement('span', { style: { fontSize: 'var(--dgw-font-sm)', color: 'var(--dgw-text-2)' } }, 'no upstream'),
       React.createElement('span', { style: { flex: '1 1 auto' } }),
       branch.ahead > 0
-        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `↑${branch.ahead}`)
+        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: 'var(--dgw-font-sm)', color: 'var(--dgw-text-2)', flex: 'none' } }, `↑${branch.ahead}`)
         : null,
       branch.behind > 0
-        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `↓${branch.behind}`)
+        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: 'var(--dgw-font-sm)', color: 'var(--dgw-text-2)', flex: 'none' } }, `↓${branch.behind}`)
         : null,
       data.stashCount > 0 ? React.createElement(Muted, null, `${data.stashCount} stashed`) : null,
       refreshing
@@ -803,77 +786,81 @@ function StatusBar({ data, onDispatch, refreshing }) {
     setBusy(name)
     Promise.resolve(onDispatch({ name, args: {}, next: refreshAction() })).finally(() => setBusy(null))
   }
-  const syncBtn = (name, label, title, disabled) =>
+  const syncBtn = (name, label, icon, title, disabled) =>
     React.createElement(
-      'button',
-      {
-        type: 'button',
-        className: 'dgw-stagebtn dgw-syncbtn',
-        disabled: disabled || busy !== null,
-        title,
-        onClick: () => sync(name),
-      },
-      busy === name ? '…' : label,
+      Tooltip,
+      { label: title, side: 'bottom', delayMs: 250 },
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          className: 'dgw-syncbtn',
+          disabled: disabled || busy !== null,
+          'aria-label': title,
+          onClick: () => sync(name),
+        },
+        busy === name
+          ? React.createElement('progress', { className: 'dgw-spinner', 'aria-label': `${label} in progress` })
+          : React.createElement(Icon, { name: icon, size: 14 }),
+        React.createElement('span', { className: 'dgw-syncbtn__label' }, label),
+      ),
     )
   return React.createElement(
     'div',
-    { className: 'dgw-statusbar', style: { flexDirection: 'column', alignItems: 'stretch', gap: '3px' } },
+    { className: 'dgw-statusbar' },
     React.createElement(
       'div',
-      { style: { display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 } },
+      { className: 'dgw-statusbar__row' },
       React.createElement(
         'span',
-        { style: { display: 'inline-flex', color: 'var(--dsw-alias-label-caption)', flex: 'none' } },
-        React.createElement(IconBranchOutline16, { size: 13 }),
+        { className: 'dgw-statusbar__branch' },
+        React.createElement(Icon, { name: 'branch', size: 14, style: { color: 'var(--dgw-text-3)' } }),
+        React.createElement('span', { className: 'dgw-statusbar__name', title: branch.name || 'detached' }, branch.name || 'detached'),
+        branch.upstream
+          ? React.createElement(
+              'span',
+              { className: 'dgw-statusbar__upstream', title: `Tracks ${branch.upstream}` },
+              React.createElement(ArrowIcon, { size: 10 }),
+              branch.upstream,
+            )
+          : null,
+        branch.ahead > 0 || branch.behind > 0
+          ? React.createElement(
+              'span',
+              { className: 'dgw-statusbar__counts' },
+              branch.ahead > 0 ? React.createElement('span', { title: `${branch.ahead} commit(s) ahead` }, `↑${branch.ahead}`) : null,
+              branch.behind > 0 ? React.createElement('span', { title: `${branch.behind} commit(s) behind` }, `↓${branch.behind}`) : null,
+            )
+          : null,
       ),
-      React.createElement(
-        Code,
-        { style: { fontSize: '12.5px', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-        branch.name || 'detached',
-      ),
-      branch.upstream
-        ? React.createElement(
-            'span',
-            { title: branch.upstream, style: { display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10.5px', color: 'var(--dsw-alias-label-caption)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-            React.createElement(ArrowIcon, { size: 9 }),
-            branch.upstream,
-          )
-        : null,
-      branch.ahead > 0
-        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '10.5px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `↑${branch.ahead}`)
-        : null,
-      branch.behind > 0
-        ? React.createElement('span', { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '10.5px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `↓${branch.behind}`)
-        : null,
-      React.createElement('span', { style: { flex: '1 1 auto' } }),
       onDispatch
         ? React.createElement(
             'span',
-            { style: { display: 'inline-flex', gap: '4px', flex: 'none' } },
-            syncBtn('git-fetch', 'Fetch', 'Fetch from remote', false),
-            syncBtn('git-pull', 'Pull', 'Pull (fast-forward only)', !branch.upstream),
-            syncBtn('git-push', 'Push', branch.upstream ? 'Push to remote' : 'Publish this branch to origin', false),
+            { className: 'dgw-sync', role: 'group', 'aria-label': 'Remote sync actions' },
+            syncBtn('git-fetch', 'Fetch', 'refresh', 'Fetch from remote', false),
+            syncBtn('git-pull', 'Pull', 'arrowDown', 'Pull (fast-forward only)', !branch.upstream),
+            syncBtn('git-push', 'Push', 'cloudUpload', branch.upstream ? 'Push to remote' : 'Publish this branch to origin', false),
           )
         : null,
     ),
     React.createElement(
       'div',
-      { style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 } },
-      React.createElement(Dot, { state: data.clean ? 'done' : 'warning', size: 7 }),
+      { className: 'dgw-statusbar__row' },
       React.createElement(
         'span',
-        { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' } },
-        data.clean ? 'Clean' : `${dirty} change${dirty === 1 ? '' : 's'}`,
+        { className: 'dgw-statusbar__state' },
+        React.createElement(Dot, { state: data.clean ? 'done' : 'warning', size: 7 }),
+        data.clean ? 'Working tree clean' : `${dirty} change${dirty === 1 ? '' : 's'}`,
+        refreshing
+          ? React.createElement('progress', { className: 'dgw-spinner', 'aria-label': 'Refreshing workspace' })
+          : null,
       ),
-      refreshing
-        ? React.createElement(React.Fragment, null, React.createElement(Dot, { state: 'ongoing', size: 7 }), React.createElement(Muted, null, 'refreshing…'))
-        : null,
-      React.createElement('span', { style: { flex: '1 1 auto' } }),
+      React.createElement('span', { className: 'dgw-spacer' }),
       data.repository && repoWebUrl(data.repository.remote)
         ? React.createElement(
             'a',
             { href: repoWebUrl(data.repository.remote), target: '_blank', rel: 'noreferrer', className: 'dgw-linkicon', title: 'Open repository on GitHub', 'aria-label': 'Open repository on GitHub' },
-            React.createElement(IconRightUpOutline16, { size: 12 }),
+            React.createElement(IconRightUpOutline16, { size: 14 }),
           )
         : null,
     ),
@@ -887,13 +874,30 @@ function CommitBar({ data, onDispatch, onRefresh, ui, setUi }) {
   const [menu, setMenu] = React.useState(false)
   const [branchAction, setBranchAction] = React.useState(null)
   const [branchName, setBranchName] = React.useState('')
+  const [success, setSuccess] = React.useState(false)
+  const menuAnchorRef = React.useRef(null)
+  const successTimer = React.useRef(null)
   const staged = stagedCount(data)
   const canCommit = Boolean(onDispatch) && staged > 0 && Boolean(msg.trim()) && !busy
+  const flashSuccess = () => {
+    setSuccess(true)
+    if (successTimer.current) clearTimeout(successTimer.current)
+    successTimer.current = setTimeout(() => setSuccess(false), 2400)
+  }
   const after = (action, ok) => {
     if (!ok) return
-    if (action === 'commit' || action === 'commit-push' || action === 'commit-sync') setMsg('')
+    if (action === 'commit' || action === 'commit-push' || action === 'commit-sync') {
+      setMsg('')
+      flashSuccess()
+    }
     if (action !== 'create-pr' && onRefresh) onRefresh()
   }
+  React.useEffect(
+    () => () => {
+      if (successTimer.current) clearTimeout(successTimer.current)
+    },
+    [],
+  )
   const commit = () => {
     if (!canCommit) return
     setBusy(true)
@@ -931,7 +935,7 @@ function CommitBar({ data, onDispatch, onRefresh, ui, setUi }) {
             className: 'dgw-action',
             label,
             confirmLabel: `Confirm ${label.toLowerCase()}`,
-            style: { color: 'var(--dsw-alias-state-error-primary)', textAlign: 'left' },
+            style: { color: 'var(--dgw-error)', textAlign: 'left' },
             onConfirm: () => run(id),
           })
         : React.createElement(
@@ -945,7 +949,7 @@ function CommitBar({ data, onDispatch, onRefresh, ui, setUi }) {
             label,
           ),
       (id === 'create-pr' || id === 'push-before-pr') && data.pullRequest
-        ? React.createElement('div', { style: { padding: '0 12px 5px', fontSize: '11px', color: 'var(--dsw-alias-label-caption)' } }, 'A pull request already exists')
+        ? React.createElement('div', { className: 'dgw-actionnote' }, 'A pull request already exists')
         : null,
     )
   return React.createElement(
@@ -967,47 +971,66 @@ function CommitBar({ data, onDispatch, onRefresh, ui, setUi }) {
     }),
     React.createElement(
       'div',
-      { style: { position: 'relative', display: 'flex', flex: 'none' } },
+      { className: 'dgw-commitbar__row' },
       React.createElement(
         'button',
         {
           type: 'button',
-          className: 'dgw-stagebtn',
+          className: 'dgw-stagebtn dgw-primarybtn',
           disabled: !canCommit,
           onClick: commit,
           title: staged === 0 ? 'Stage something first' : !msg.trim() ? 'Write a commit message' : 'Commit staged changes',
-          style: { borderRadius: '8px 0 0 8px' },
+          style: { flex: '1 1 auto' },
         },
-        React.createElement(IconPlusOutline16, { size: 14 }),
-        busy ? 'Working…' : staged > 0 ? `Commit ${staged} staged` : 'Commit',
+        React.createElement(Icon, { name: 'gitCommit', size: 16 }),
+        busy ? 'Committing…' : staged > 0 ? `Commit ${staged} staged` : 'Commit',
       ),
       React.createElement(
         'button',
         {
+          ref: menuAnchorRef,
           type: 'button',
           className: 'dgw-stagebtn',
           'aria-label': 'More Git operations',
+          'aria-expanded': menu,
+          title: 'More Git operations',
           disabled: busy,
           onClick: () => setMenu((v) => !v),
-          style: { width: '38px', borderLeft: '1px solid var(--dsw-alias-border-l1)', borderRadius: '0 8px 8px 0' },
+          style: { width: '34px', flex: 'none', padding: 0 },
         },
-        React.createElement(IconChevronRightOutline14, { size: 14, style: { transform: 'rotate(90deg)' } }),
+        React.createElement(Icon, { name: 'ellipsis', size: 16 }),
       ),
-      menu ? React.createElement('div', { className: 'dgw-actionmenu' }, GIT_ACTIONS.map(([id, label], i) => menuItem(id, label, i))) : null,
+      menu
+        ? React.createElement(
+            DropdownMenu,
+            { anchorRef: menuAnchorRef, onClose: () => setMenu(false), placement: 'top' },
+            GIT_ACTIONS.map(([id, label], i) => menuItem(id, label, i)),
+          )
+        : null,
     ),
     React.createElement(
       'div',
-      { style: { fontSize: '10.5px', color: 'var(--dsw-alias-label-caption)', paddingLeft: '2px' } },
-      staged > 0 ? `${staged} staged` : 'Nothing staged',
-      onDispatch ? null : ' — native commands unavailable',
+      { className: 'dgw-commitbar__hint', role: 'status', 'aria-live': 'polite' },
+      success
+        ? React.createElement(
+            'span',
+            { className: 'dgw-commitbar__success' },
+            React.createElement(Icon, { name: 'circleCheck', size: 14 }),
+            'Committed',
+          )
+        : staged > 0
+          ? `${staged} staged file${staged === 1 ? '' : 's'}`
+          : onDispatch
+            ? 'Nothing staged'
+            : 'Native commands unavailable',
     ),
     branchAction
       ? React.createElement(
           'div',
-          { style: { display: 'flex', gap: '6px', flex: 'none' } },
+          { className: 'dgw-commitbar__row' },
           React.createElement('input', {
-            className: 'dgw-textarea',
-            style: { minHeight: '28px', height: '28px', flex: '1 1 auto' },
+            className: 'dgw-textarea dgw-input',
+            style: { flex: '1 1 auto' },
             placeholder: branchAction === 'new-branch' ? 'New branch name' : 'Branch name',
             'aria-label': 'Branch name',
             autoFocus: true,
@@ -1025,8 +1048,8 @@ function CommitBar({ data, onDispatch, onRefresh, ui, setUi }) {
               }
             },
           }),
-          React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: busy || !branchName.trim(), onClick: confirmBranch, title: `${BRANCH_ACTION_VERBS[branchAction]} this branch`, style: { width: 'auto', padding: '0 12px', flex: 'none' } }, BRANCH_ACTION_VERBS[branchAction]),
-          React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: busy, onClick: () => setBranchAction(null), style: { width: 'auto', padding: '0 10px', flex: 'none' } }, 'Cancel'),
+          React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: busy || !branchName.trim(), onClick: confirmBranch, title: `${BRANCH_ACTION_VERBS[branchAction]} this branch`, style: { width: 'auto', flex: 'none' } }, BRANCH_ACTION_VERBS[branchAction]),
+          React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: busy, onClick: () => setBranchAction(null), style: { width: 'auto', flex: 'none' } }, 'Cancel'),
         )
       : null,
     branchAction && branchAction !== 'new-branch' && Array.isArray(data.branches)
@@ -1041,12 +1064,18 @@ function CommitBar({ data, onDispatch, onRefresh, ui, setUi }) {
   )
 }
 
-function CleanState({ text }) {
+function EmptyState({ icon = 'circleCheck', title, hint, action }) {
   return React.createElement(
     'div',
-    { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '7px', padding: '22px 0 14px', width: '100%' } },
-    React.createElement(CircleIcon, { tone: 'success', size: 24 }, React.createElement(IconCheckOutline14, { size: 13 })),
-    React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, text),
+    { className: 'dgw-empty' },
+    React.createElement(
+      'span',
+      { className: 'dgw-empty__icon' },
+      React.createElement(Icon, { name: icon, size: 20 }),
+    ),
+    React.createElement('span', { className: 'dgw-empty__title' }, title),
+    hint ? React.createElement('span', { className: 'dgw-empty__hint' }, hint) : null,
+    action ? React.createElement('span', { className: 'dgw-empty__action' }, action) : null,
   )
 }
 
@@ -1083,15 +1112,11 @@ function ChangeGroup({ id, title, files, open, onToggle, bulk, treeProps, onDisp
       React.createElement(
         'span',
         { className: 'dgw-chevron', 'data-open': String(open) },
-        React.createElement(IconChevronRightOutline14, { size: 12 }),
+        React.createElement(IconChevronRightOutline14, { size: 14 }),
       ),
-      React.createElement(
-        'span',
-        { style: { fontSize: '10.5px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--dsw-alias-label-secondary)' } },
-        title,
-      ),
-      React.createElement('span', { style: { fontSize: '10.5px', fontWeight: 600, color: 'var(--dsw-alias-label-caption)' } }, String(files.length)),
-      React.createElement('span', { style: { flex: '1 1 auto' } }),
+      React.createElement('span', { className: 'dgw-grouphd__title' }, title),
+      React.createElement('span', { className: 'dgw-grouphd__count' }, String(files.length)),
+      React.createElement('span', { className: 'dgw-spacer' }),
       bulk
         ? React.createElement(
             'button',
@@ -1107,7 +1132,13 @@ function ChangeGroup({ id, title, files, open, onToggle, bulk, treeProps, onDisp
           )
         : null,
     ),
-    open ? React.createElement(FileTree, { files, group: id, onDispatch, viewMode, ...treeProps }) : null,
+    open
+      ? React.createElement(
+          'div',
+          { className: 'dgw-groupbody' },
+          React.createElement(FileTree, { files, group: id, onDispatch, viewMode, ...treeProps }),
+        )
+      : null,
   )
 }
 
@@ -1132,13 +1163,9 @@ function ChangesView({ data, onDispatch, search, searchOpen, onToggleSearch, vie
   const header = React.createElement(
     'div',
     { className: 'dgw-changeshead' },
-    React.createElement(
-      'span',
-      { style: { fontSize: '11px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--dsw-alias-label-secondary)' } },
-      'Changes',
-    ),
-    React.createElement('span', { style: { fontSize: '11px', fontWeight: 600, color: 'var(--dsw-alias-label-caption)' } }, String(countDirty(data))),
-    React.createElement('span', { style: { flex: '1 1 auto' } }),
+    React.createElement('span', { className: 'dgw-changeshead__title' }, 'Changes'),
+    React.createElement('span', { className: 'dgw-changeshead__count' }, String(countDirty(data))),
+    React.createElement('span', { className: 'dgw-spacer' }),
     onDispatch && !data.clean
       ? React.createElement(
           React.Fragment,
@@ -1149,18 +1176,17 @@ function ChangesView({ data, onDispatch, search, searchOpen, onToggleSearch, vie
       : null,
     React.createElement(
       IconActionBtn,
-      { title: searchOpen ? 'Close search' : 'Search files', onClick: onToggleSearch, tone: searchOpen ? 'var(--dsw-alias-brand-primary)' : undefined },
-      React.createElement(SearchIcon, { size: 13 }),
+      { title: searchOpen ? 'Close search' : 'Search files', onClick: onToggleSearch, tone: searchOpen ? 'var(--dgw-accent)' : undefined },
+      React.createElement(SearchIcon, { size: 14 }),
     ),
     all.length > 0 ? React.createElement(ViewModeToggle, { mode: viewMode, onChange: onViewMode }) : null,
   )
   const searchBar = searchOpen
     ? React.createElement(
         'div',
-        { style: { padding: '3px 0 5px' } },
+        { className: 'dgw-searchbar' },
         React.createElement('input', {
-          className: 'dgw-textarea',
-          style: { minHeight: '26px', height: '26px' },
+          className: 'dgw-textarea dgw-input',
           placeholder: 'Search files by name…',
           'aria-label': 'Search files by name',
           autoFocus: true,
@@ -1178,10 +1204,21 @@ function ChangesView({ data, onDispatch, search, searchOpen, onToggleSearch, vie
   const body =
     all.length === 0
       ? data.clean
-        ? React.createElement(CleanState, { text: 'No changes — your working tree is clean.' })
-        : React.createElement(Muted, null, 'File list unavailable in this session’s data — refresh to fetch it.')
+        ? React.createElement(EmptyState, {
+            title: 'Working tree clean',
+            hint: 'No changes to stage or commit.',
+          })
+        : React.createElement(EmptyState, {
+            icon: 'warning',
+            title: 'File list unavailable',
+            hint: 'Refresh the workspace to load the changed files.',
+          })
       : total === 0
-        ? React.createElement(Muted, null, `No files match “${searchValue}”.`)
+        ? React.createElement(EmptyState, {
+            icon: 'search',
+            title: 'No matching files',
+            hint: `Nothing matches “${searchValue}”.`,
+          })
         : React.createElement(
             React.Fragment,
             null,
@@ -1221,17 +1258,17 @@ function ChangesView({ data, onDispatch, search, searchOpen, onToggleSearch, vie
           )
   return React.createElement(
     'div',
-    { style: { display: 'flex', flexDirection: 'column', paddingBottom: '6px' } },
+    { className: 'dgw-changes' },
     header,
     searchBar,
     body,
     data.filesTruncated
-      ? React.createElement('div', { style: { paddingTop: '6px' } }, React.createElement(Muted, null, `File list truncated — showing the first ${all.length} changed files.`))
+      ? React.createElement('div', { className: 'dgw-note' }, `File list truncated, showing the first ${all.length} changed files.`)
       : null,
   )
 }
 
-const GRAPH_LINE = 'var(--dsw-alias-border-l2)'
+const GRAPH_LINE = 'var(--dgw-border-2)'
 
 function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch, filesViewMode, onDispatch, treeProps }) {
   const isHead = i === 0
@@ -1241,10 +1278,10 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch
   const isTargetBoundary = Boolean(targetBranch) && i === targetBranch.ahead
   const isMerge = /^Merge\b/.test(c.message || '')
   const color = isLocal
-    ? 'var(--dsw-alias-brand-primary)'
+    ? 'var(--dgw-accent)'
     : upstream
-      ? 'var(--dsw-alias-state-warn-primary)'
-      : 'var(--dsw-alias-label-caption)'
+      ? 'var(--dgw-warn)'
+      : 'var(--dgw-text-3)'
   // HEAD and merge commits render as hollow rings ("graph nodes"); selecting
   // (expanding) a row fills it solid so the selected commit stands out.
   const isRing = isHead || isMerge
@@ -1269,9 +1306,9 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch
   const toggle = () => setOpen((v) => !v)
   const meta = [c.author, c.date ? fmtDate(c.date) : null, c.shortSha].filter(Boolean).join(' · ')
   const pills = []
-  if (isHead && branchName) pills.push(React.createElement(TintPill, { key: 'head', text: branchName, color: 'var(--dsw-alias-brand-primary)' }))
-  if (isBoundary) pills.push(React.createElement(TintPill, { key: 'upstream', text: upstream, color: 'var(--dsw-alias-state-warn-primary)' }))
-  if (isTargetBoundary) pills.push(React.createElement(TintPill, { key: 'target', text: targetBranch.name, color: 'var(--dsw-alias-state-warn-primary)' }))
+  if (isHead && branchName) pills.push(React.createElement(TintPill, { key: 'head', text: branchName, color: 'var(--dgw-accent)' }))
+  if (isBoundary) pills.push(React.createElement(TintPill, { key: 'upstream', text: upstream, color: 'var(--dgw-warn)' }))
+  if (isTargetBoundary) pills.push(React.createElement(TintPill, { key: 'target', text: targetBranch.name, color: 'var(--dgw-warn)' }))
   return React.createElement(
     'div',
     { style: { display: 'flex', flexDirection: 'column' } },
@@ -1297,7 +1334,7 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch
           minHeight: '26px',
           padding: '0 6px 0 0',
           cursor: 'pointer',
-          ...(open ? { background: 'var(--dsw-alias-interactive-bg-hover)' } : {}),
+          ...(open ? { background: 'var(--dgw-hover)' } : {}),
         },
       },
       React.createElement(
@@ -1318,7 +1355,7 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch
           'span',
           {
             title: `${c.shortSha} · ${c.author}`,
-            style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+            style: { fontSize: 'var(--dgw-font-md)', color: 'var(--dgw-text)', flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
           },
           (c.message || '').split('\n')[0],
         ),
@@ -1329,8 +1366,8 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch
               {
                 title: c.author,
                 style: {
-                  fontSize: '11px',
-                  color: 'var(--dsw-alias-label-caption)',
+                  fontSize: 'var(--dgw-font-sm)',
+                  color: 'var(--dgw-text-3)',
                   flex: 'none',
                   maxWidth: '92px',
                   overflow: 'hidden',
@@ -1356,7 +1393,7 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch
                 background: 'none',
                 cursor: 'pointer',
                 display: 'inline-flex',
-                color: 'var(--dsw-alias-label-caption)',
+                color: 'var(--dgw-text-3)',
                 ...(open ? { opacity: 1 } : {}),
               },
               onClick: (e) => {
@@ -1378,8 +1415,8 @@ function CommitGraphRow({ c, i, total, branchName, ahead, upstream, targetBranch
                 {
                   style: {
                     fontFamily: 'var(--dsw-font-family-code)',
-                    fontSize: '11px',
-                    color: 'var(--dsw-alias-label-caption)',
+                    fontSize: 'var(--dgw-font-sm)',
+                    color: 'var(--dgw-text-3)',
                     padding: '0 6px 4px 24px',
                   },
                 },
@@ -1473,16 +1510,16 @@ function ciCheckId(check) {
 function CheckDetailPanel({ check, onDispatch }) {
   const runId = ciRunId(check)
   const checkId = ciCheckId(check)
-  const fieldStyle = { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' }
-  const labelStyle = { fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--dsw-alias-label-caption)' }
+  const fieldStyle = { fontSize: 'var(--dgw-font-sm)', color: 'var(--dgw-text-2)' }
+  const labelStyle = { fontSize: 'var(--dgw-font-xs)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--dgw-text-3)' }
   return React.createElement(
     'div',
     {
       style: {
         margin: '2px 6px 8px 33px',
         padding: '8px 10px',
-        borderRadius: '8px',
-        background: 'var(--dsw-alias-bg-layer-2)',
+        borderRadius: 'var(--dgw-radius-md)',
+        background: 'var(--dgw-surface)',
         display: 'flex',
         flexDirection: 'column',
         gap: '8px',
@@ -1493,7 +1530,7 @@ function CheckDetailPanel({ check, onDispatch }) {
       { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
       React.createElement(
         Code,
-        { style: { fontSize: '11.5px', flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+        { style: { fontSize: 'var(--dgw-font-sm)', flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
         check.name,
       ),
       check.url
@@ -1503,7 +1540,7 @@ function CheckDetailPanel({ check, onDispatch }) {
               href: check.url,
               target: '_blank',
               rel: 'noreferrer',
-              style: { display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', textDecoration: 'none', flex: 'none' },
+              style: { display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: 'var(--dgw-font-sm)', color: 'var(--dgw-text-2)', textDecoration: 'none', flex: 'none' },
               onClick: (e) => { if (e) e.stopPropagation() },
             },
             'View full details',
@@ -1514,7 +1551,7 @@ function CheckDetailPanel({ check, onDispatch }) {
     React.createElement(
       'div',
       { style: { ...fieldStyle, display: 'flex', flexWrap: 'wrap', columnGap: '14px', rowGap: '2px' } },
-      React.createElement('span', null, 'Status: ', React.createElement('span', { style: { color: 'var(--dsw-alias-label-primary)' } }, checkLabel(check))),
+      React.createElement('span', null, 'Status: ', React.createElement('span', { style: { color: 'var(--dgw-text)' } }, checkLabel(check))),
       check.startedAt ? React.createElement('span', null, `Started ${fmtTime(check.startedAt)}`) : null,
       check.completedAt ? React.createElement('span', null, `Completed ${fmtTime(check.completedAt)}`) : null,
     ),
@@ -1536,7 +1573,7 @@ function CheckDetailPanel({ check, onDispatch }) {
             {
               type: 'button',
               className: 'dgw-linkicon',
-              style: { width: 'auto', gap: '5px', padding: '0 4px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' },
+              style: { width: 'auto', gap: '5px', padding: '0 4px', fontSize: 'var(--dgw-font-sm)', color: 'var(--dgw-text-2)' },
               title: "Fetch this check run's warning/error annotations",
               onClick: (e) => {
                 if (e) e.stopPropagation()
@@ -1554,13 +1591,13 @@ function CheckDetailPanel({ check, onDispatch }) {
       React.createElement('span', { style: labelStyle }, 'Jobs'),
       React.createElement(
         'div',
-        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px' } },
+        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 'var(--dgw-font-sm)' } },
         React.createElement(
           'span',
-          { style: { color: 'var(--dsw-alias-label-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+          { style: { color: 'var(--dgw-text)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
           check.name,
         ),
-        React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, check.conclusion || check.status || ''),
+        React.createElement('span', { style: { color: 'var(--dgw-text-2)', flex: 'none' } }, check.conclusion || check.status || ''),
       ),
     ),
   )
@@ -1597,12 +1634,12 @@ function CheckRow({ check, onDispatch }) {
       React.createElement(CheckIcon, { check }),
       React.createElement(
         'span',
-        { title: check.name, style: { fontSize: '12px', color: 'var(--dsw-alias-label-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } },
+        { title: check.name, style: { fontSize: 'var(--dgw-font-md)', color: 'var(--dgw-text)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' } },
         check.name,
       ),
       React.createElement(
         'span',
-        { style: { fontSize: '11px', color: s === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)', flex: 'none' } },
+        { style: { fontSize: 'var(--dgw-font-sm)', color: s === 'error' ? 'var(--dgw-error)' : 'var(--dgw-text-2)', flex: 'none' } },
         checkLabel(check),
       ),
       onDispatch && runId
@@ -1613,7 +1650,7 @@ function CheckRow({ check, onDispatch }) {
               className: 'dgw-linkicon',
               title: 'Fetch failure logs',
               'aria-label': 'Fetch failure logs',
-              style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', color: 'var(--dsw-alias-state-error-primary)' },
+              style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', color: 'var(--dgw-error)' },
               onClick: (e) => {
                 if (e) e.stopPropagation()
                 onDispatch({ name: 'git-ci-logs', args: { runId } })
@@ -1675,13 +1712,13 @@ function ChecksSection({ ci, onDispatch }) {
 function CommentItem({ comment, dimmed }) {
   return React.createElement(
     'div',
-    { style: { padding: '7px 0', borderTop: '1px solid var(--dsw-alias-border-l1)', opacity: dimmed ? 0.6 : 1 } },
+    { style: { padding: '7px 0', borderTop: '1px solid var(--dgw-border)', opacity: dimmed ? 0.6 : 1 } },
     React.createElement(
       'div',
       { style: { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' } },
-      React.createElement('span', { style: { fontSize: '11px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, comment.author || 'anonymous'),
+      React.createElement('span', { style: { fontSize: 'var(--dgw-font-sm)', fontWeight: 600, color: 'var(--dgw-text)' } }, comment.author || 'anonymous'),
       comment.createdAt ? React.createElement(Muted, null, String(comment.createdAt).slice(0, 10)) : null,
-      comment.resolved ? React.createElement(TintPill, { text: 'Resolved', color: 'var(--dsw-alias-label-secondary)' }) : null,
+      comment.resolved ? React.createElement(TintPill, { text: 'Resolved', color: 'var(--dgw-text-2)' }) : null,
       React.createElement('span', { style: { flex: '1 1 auto' } }),
       comment.url
         ? React.createElement(
@@ -1694,7 +1731,7 @@ function CommentItem({ comment, dimmed }) {
     comment.path
       ? React.createElement(
           'div',
-          { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px', color: 'var(--dsw-alias-label-caption)', marginBottom: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+          { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: 'var(--dgw-font-sm)', color: 'var(--dgw-text-3)', marginBottom: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
           comment.path + (comment.line ? ':' + comment.line : ''),
         )
       : null,
@@ -1703,9 +1740,9 @@ function CommentItem({ comment, dimmed }) {
       {
         title: comment.body,
         style: {
-          fontSize: '11.5px',
+          fontSize: 'var(--dgw-font-sm)',
           lineHeight: '16px',
-          color: 'var(--dsw-alias-label-secondary)',
+          color: 'var(--dgw-text-2)',
           display: '-webkit-box',
           WebkitLineClamp: 3,
           WebkitBoxOrient: 'vertical',
@@ -1756,6 +1793,7 @@ function MergeReviewControls({ pr, state, onDispatch }) {
   const [delBranch, setDelBranch] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const mergeMenuRef = React.useRef(null)
   const act = (action) => {
     if (busy || !open || !onDispatch) return
     setBusy(true)
@@ -1785,10 +1823,10 @@ function MergeReviewControls({ pr, state, onDispatch }) {
     })
   return React.createElement(
     'div',
-    { style: { display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'stretch', padding: '2px 2px 12px' } },
+    { className: 'dgw-pr__controls' },
     React.createElement(
       'div',
-      { style: { position: 'relative', display: 'flex', flex: 'none' } },
+      { className: 'dgw-mergegroup' },
       React.createElement(
         'button',
         {
@@ -1796,29 +1834,29 @@ function MergeReviewControls({ pr, state, onDispatch }) {
           className: 'dgw-mergebtn',
           disabled: !open || busy,
           title: 'Merge this pull request with the selected method',
-          style: { borderRadius: '8px 0 0 8px' },
           onClick: merge,
         },
-        React.createElement(IconBranchOutline16, { size: 14 }),
+        React.createElement(Icon, { name: 'gitCommit', size: 16 }),
         busy ? 'Working…' : mergeLabel,
       ),
       React.createElement(
         'button',
         {
+          ref: mergeMenuRef,
           type: 'button',
-          className: 'dgw-mergebtn',
+          className: 'dgw-mergebtn dgw-mergebtn--chev',
           disabled: !open || busy,
           'aria-label': 'Choose merge method, or close this pull request',
+          'aria-expanded': menuOpen,
           title: 'Choose merge method, or close this pull request',
-          style: { flex: 'none', width: '32px', borderLeft: '1px solid rgba(255,255,255,0.35)', borderRadius: '0 8px 8px 0' },
           onClick: () => setMenuOpen((v) => !v),
         },
-        React.createElement(IconChevronRightOutline14, { size: 14, style: { transform: 'rotate(90deg)' } }),
+        React.createElement(Icon, { name: 'chevronRight', size: 16, style: { transform: 'rotate(90deg)' } }),
       ),
       menuOpen
         ? React.createElement(
-            'div',
-            { className: 'dgw-actionmenu', style: { width: '210px' } },
+            DropdownMenu,
+            { anchorRef: mergeMenuRef, onClose: () => setMenuOpen(false), style: { width: '210px' } },
             MERGE_METHODS.map(([id, label]) =>
               React.createElement(MenuItem, {
                 key: id,
@@ -1835,7 +1873,7 @@ function MergeReviewControls({ pr, state, onDispatch }) {
               className: 'dgw-action',
               label: 'Close pull request',
               confirmLabel: 'Confirm close pull request',
-              style: { color: 'var(--dsw-alias-state-error-primary)', textAlign: 'left' },
+              style: { color: 'var(--dgw-error)', textAlign: 'left' },
               onConfirm: closePr,
             }),
           )
@@ -1843,22 +1881,22 @@ function MergeReviewControls({ pr, state, onDispatch }) {
     ),
     React.createElement(
       'div',
-      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' } },
+      { className: 'dgw-pr__actions' },
       React.createElement(
         'label',
-        { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', cursor: open ? 'pointer' : 'default', flex: 'none' } },
+        { className: 'dgw-checkbox' },
         React.createElement('input', { type: 'checkbox', checked: delBranch, disabled: !open, onChange: (e) => setDelBranch(e.target.checked) }),
         'Delete source branch',
       ),
       React.createElement(
         'div',
-        { style: { display: 'flex', gap: '6px', flex: 'none' } },
-        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Approve this pull request', style: { width: 'auto', padding: '0 10px' }, onClick: () => act(reviewAction('APPROVE')) }, 'Approve'),
-        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Request changes on this pull request', style: { width: 'auto', padding: '0 10px', color: 'var(--dsw-alias-state-warn-primary)' }, onClick: () => act(reviewAction('REQUEST_CHANGES')) }, 'Request changes'),
+        { className: 'dgw-pr__review' },
+        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Approve this pull request', onClick: () => act(reviewAction('APPROVE')) }, 'Approve'),
+        React.createElement('button', { type: 'button', className: 'dgw-stagebtn', disabled: !open || busy, title: 'Request changes on this pull request', style: { color: 'var(--dgw-warn)' }, onClick: () => act(reviewAction('REQUEST_CHANGES')) }, 'Request changes'),
       ),
     ),
     !open
-      ? React.createElement(Muted, null, state === 'MERGED' ? 'Pull request is already merged.' : 'Merging and reviews are available while the pull request is open.')
+      ? React.createElement('div', { className: 'dgw-note' }, state === 'MERGED' ? 'Pull request is already merged.' : 'Merging and reviews are available while the pull request is open.')
       : null,
   )
 }
@@ -1883,7 +1921,7 @@ function CommentComposer({ pr, disabled, onDispatch }) {
   }
   return React.createElement(
     'div',
-    { style: { display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '8px', marginTop: '4px', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
+    { style: { display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '8px', marginTop: '4px', borderTop: '1px solid var(--dgw-border)' } },
     React.createElement('textarea', {
       className: 'dgw-textarea',
       placeholder: 'Post a comment…',
@@ -1914,36 +1952,26 @@ function PrTab({ data, refreshing, onDispatch }) {
     const target = (data.comparison && data.comparison.base) || upstream
     return React.createElement(
       'div',
-      { style: { padding: '12px 2px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start', flex: 'none' } },
-      onDispatch
-        ? React.createElement(
-            'button',
-            {
-              type: 'button',
-              className: 'dgw-createpr',
-              title: 'Open a pull request for this branch',
-              onClick: () =>
-                onDispatch(actionCommand('create-pr', '', data)),
-            },
-            React.createElement(IconBranchOutline16, { size: 14 }),
-            'Create PR',
-          )
-        : null,
-      React.createElement(
-        'div',
-        { style: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 } },
-        React.createElement(
-          'span',
-          { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } },
-          (data.repository && data.repository.name) || 'Working tree',
-        ),
-        React.createElement(
-          'span',
-          { style: { fontFamily: 'var(--dsw-font-family-code)', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-          target ? `→ ${target}` : 'no upstream',
-        ),
-      ),
-      refreshing ? React.createElement(Muted, null, 'Loading pull request…') : null,
+      { className: 'dgw-pr' },
+      React.createElement(EmptyState, {
+        icon: 'pullRequest',
+        title: 'No pull request yet',
+        hint: `${(data.repository && data.repository.name) || 'This branch'}${target ? ` → ${target}` : ''}`,
+        action: onDispatch
+          ? React.createElement(
+              'button',
+              {
+                type: 'button',
+                className: 'dgw-createpr',
+                title: 'Open a pull request for this branch',
+                onClick: () => onDispatch(actionCommand('create-pr', '', data)),
+              },
+              React.createElement(Icon, { name: 'gitCommit', size: 16 }),
+              'Create PR',
+            )
+          : null,
+      }),
+      refreshing ? React.createElement('div', { className: 'dgw-note' }, 'Loading pull request…') : null,
     )
   }
   const state = (pr.state || 'open').toUpperCase()
@@ -1958,49 +1986,44 @@ function PrTab({ data, refreshing, onDispatch }) {
     null,
     React.createElement(
       'div',
-      { style: { padding: '10px 2px 8px', display: 'flex', flexDirection: 'column', gap: '5px', flex: 'none' } },
+      { className: 'dgw-pr__head' },
       React.createElement(
         'div',
-        { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        { className: 'dgw-pr__headline' },
         React.createElement(
           'span',
-          { style: { display: 'inline-flex', color: 'var(--dsw-alias-state-success-primary)', flex: 'none' } },
-          React.createElement(IconBranchOutline16, { size: 13 }),
+          { className: 'dgw-pr__stateicon', style: { color: stateColor }, title: stateText },
+          React.createElement(Icon, { name: pr.merged ? 'circleCheck' : 'pullRequest', size: 16 }),
         ),
-        React.createElement('span', { style: { fontSize: '13px', fontWeight: 700 } }, `#${pr.number}`),
+        React.createElement('span', { className: 'dgw-pr__number' }, `#${pr.number}`),
         React.createElement(TintPill, { text: stateText, color: stateColor }),
-        React.createElement('span', { style: { flex: '1 1 auto' } }),
+        React.createElement('span', { className: 'dgw-spacer' }),
         React.createElement(
           'a',
           { href: pr.url, target: '_blank', rel: 'noreferrer', className: 'dgw-linkicon', 'aria-label': 'Open on GitHub', title: 'Open on GitHub' },
-          React.createElement(IconRightUpOutline16, { size: 13 }),
+          React.createElement(IconRightUpOutline16, { size: 14 }),
         ),
       ),
+      React.createElement('div', { className: 'dgw-pr__title' }, pr.title),
       React.createElement(
         'div',
-        { style: { fontSize: '13px', lineHeight: '18px', color: 'var(--dsw-alias-label-primary)' } },
-        pr.title,
-      ),
-      React.createElement(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '2px', fontFamily: 'var(--dsw-font-family-code)', fontSize: '11px' } },
+        { className: 'dgw-pr__meta' },
         additions || deletions
           ? React.createElement(
               React.Fragment,
               null,
-              React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)' } }, `+${fmtNum(additions)}`),
-              React.createElement('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, `-${fmtNum(deletions)}`),
+              React.createElement('span', { className: 'dgw-stats__add' }, `+${fmtNum(additions)}`),
+              React.createElement('span', { className: 'dgw-stats__del' }, `-${fmtNum(deletions)}`),
             )
           : null,
         pr.base
-          ? React.createElement(
-              'span',
-              { style: { color: 'var(--dsw-alias-label-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-              `${(data.branch && data.branch.name) || pr.base} → ${pr.base}`,
-            )
+          ? React.createElement(PathLabel, {
+              path: pr.base,
+              prefix: `${(data.branch && data.branch.name) || pr.base} → `,
+            })
           : null,
         pending > 0
-          ? React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, `${pending} pending commit${pending === 1 ? '' : 's'}`)
+          ? React.createElement('span', { className: 'dgw-pr__pending' }, `${pending} pending commit${pending === 1 ? '' : 's'}`)
           : null,
         onDispatch
           ? React.createElement(
@@ -2010,19 +2033,14 @@ function PrTab({ data, refreshing, onDispatch }) {
                 className: 'dgw-linkicon',
                 title: 'Fetch the full pull request diff',
                 'aria-label': 'Fetch the full pull request diff',
-                style: { border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', color: 'var(--dsw-alias-label-caption)' },
                 onClick: () => onDispatch({ name: 'git-pr-diff', args: { number: pr.number } }),
               },
-              React.createElement(IconCodeOutline16, { size: 13 }),
+              React.createElement(IconCodeOutline16, { size: 14 }),
             )
           : null,
       ),
       pr.updatedAt
-        ? React.createElement(
-            'div',
-            { style: { fontSize: '11px', color: 'var(--dsw-alias-label-caption)' } },
-            `PR updated ${fmtTime(pr.updatedAt)}`,
-          )
+        ? React.createElement('div', { className: 'dgw-pr__time' }, `PR updated ${fmtTime(pr.updatedAt)}`)
         : null,
     ),
     onDispatch
@@ -2100,6 +2118,29 @@ function GraphSection({ data, treeProps, commitFilesView, onCommitFilesView, onR
   )
 }
 
+function LoadingSkeleton() {
+  return React.createElement(
+    'div',
+    { className: 'dgw-loading', 'aria-busy': 'true' },
+    React.createElement(
+      'div',
+      { className: 'dgw-loading__label' },
+      React.createElement('progress', { className: 'dgw-spinner', 'aria-label': 'Loading Git workspace' }),
+      React.createElement('span', null, 'Loading Git workspace…'),
+    ),
+    React.createElement(
+      'div',
+      { className: 'dgw-skeleton', 'aria-hidden': 'true' },
+      React.createElement('span', { className: 'dgw-skeleton__bar' }),
+      React.createElement('span', { className: 'dgw-skeleton__bar' }),
+      React.createElement('span', { className: 'dgw-skeleton__bar' }),
+      React.createElement('span', { className: 'dgw-skeleton__bar' }),
+      React.createElement('span', { className: 'dgw-skeleton__bar' }),
+      React.createElement('span', { className: 'dgw-skeleton__bar' }),
+    ),
+  )
+}
+
 export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRefresh, autoSampled, onRefresh, onDispatch, commandsUnsupported, uiKey }) {
   const scope = uiKey || uiScope(data)
   const [ui, setUi] = usePanelUi(scope)
@@ -2128,20 +2169,29 @@ export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRef
 
   let body
   if (loading) {
-    body = React.createElement(Row, { style: { padding: '10px', flex: 'none' } }, React.createElement(Muted, null, 'Loading Git workspace…'))
+    body = React.createElement(LoadingSkeleton)
   } else if (!data) {
     body = React.createElement(
       'div',
-      { style: { padding: '14px 2px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start', flex: 'none' } },
-      React.createElement(
-        Muted,
-        null,
-        errorText
+      { className: 'dgw-nodata' },
+      React.createElement(EmptyState, {
+        icon: 'warning',
+        title: 'No workspace data',
+        hint: errorText
           ? `Git workspace: ${errorText}`
           : canRefresh === false
             ? REFRESH_HINT
             : 'No workspace data in this session yet.',
-      ),
+        action:
+          canRefresh !== false && onRefresh
+            ? React.createElement(
+                'button',
+                { type: 'button', className: 'dgw-stagebtn', onClick: onRefresh, style: { width: 'auto' } },
+                React.createElement(IconRefreshOutline14, { size: 14 }),
+                'Refresh workspace',
+              )
+            : null,
+      }),
     )
   } else {
     body = React.createElement(
@@ -2149,10 +2199,10 @@ export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRef
       null,
       commandsUnsupported
         ? React.createElement(
-            Row,
-            { style: { padding: '6px 8px', marginBottom: '4px', flex: 'none', borderRadius: '6px', background: 'var(--dsw-alias-state-warn-secondary, transparent)', border: '1px solid var(--dsw-alias-border-l1)' } },
-            React.createElement(IconWarningOutline16, { size: 14 }),
-            React.createElement(Muted, null, COMMANDS_UNSUPPORTED_HINT),
+            'div',
+            { className: 'dgw-banner', role: 'status' },
+            React.createElement(IconWarningOutline16, { size: 16 }),
+            React.createElement('span', null, COMMANDS_UNSUPPORTED_HINT),
           )
         : null,
       React.createElement(StatusBar, { data, onDispatch, refreshing }),
@@ -2191,7 +2241,7 @@ export function GitWorkspacePanel({ data, errorText, loading, refreshing, canRef
     'div',
     {
       'data-git-workspace-panel': '',
-      style: { padding: '0 14px 12px', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 },
+      className: 'dgw-root dgw-panel-shell',
     },
     body,
   )

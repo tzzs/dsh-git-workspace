@@ -117,7 +117,7 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
   return React.createElement(
     'aside',
     {
-      className: 'dgw-drawer',
+      className: 'dgw-root dgw-drawer',
       role: 'complementary',
       'aria-label': title,
       'data-git-workspace-drawer': '',
@@ -129,19 +129,20 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
         bottom: 0,
         width: `${width}px`,
         maxWidth: '92vw',
-        background: 'var(--dsw-alias-bg-layer-2)',
-        borderLeft: '1px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dgw-surface)',
+        borderLeft: '1px solid var(--dgw-border-2)',
         zIndex: overlay ? 1000 : 900,
-        boxShadow: overlay ? '0 0 32px rgba(0, 0, 0, 0.28)' : 'none',
+        boxShadow: overlay ? 'var(--dgw-shadow-pop)' : 'none',
         display: 'flex',
         flexDirection: 'column',
         fontFamily: 'var(--dsw-font-family)',
-        color: 'var(--dsw-alias-label-primary)',
+        color: 'var(--dgw-text)',
       },
     },
       React.createElement(
         'div',
         {
+          className: 'dgw-drawer__resize',
           onPointerDown: startDrag,
           role: 'separator',
           'aria-orientation': 'vertical',
@@ -160,12 +161,13 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
       React.createElement(
         'header',
         {
+          className: 'dgw-drawer__header',
           style: {
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            padding: '12px 14px',
-            borderBottom: '1px solid var(--dsw-alias-border-l1)',
+            gap: 'var(--dgw-space-2)',
+            padding: 'var(--dgw-space-3) var(--dgw-space-3)',
+            borderBottom: '1px solid var(--dgw-border)',
             flex: 'none',
           },
         },
@@ -174,13 +176,13 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
           { style: { minWidth: 0, flex: '1 1 auto' } },
           React.createElement(
             'div',
-            { style: { fontSize: '14px', fontWeight: 600, lineHeight: '18px' } },
+            { className: 'dgw-drawer__title' },
             title,
           ),
           subtitle
             ? React.createElement(
                 'div',
-                { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                { className: 'dgw-drawer__subtitle' },
                 subtitle,
               )
             : null,
@@ -196,7 +198,7 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }) {
       ),
       React.createElement(
         'div',
-        { style: { flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' } },
+        { className: 'dgw-drawer__body', style: { flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' } },
         children,
       ),
   )
